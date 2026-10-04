@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<!--
+EGG LAIR BUILD LOG (read this first when resuming; do not re-read old chats)
+Version: 2.1  |  Artifact: https://claude.ai/artifact/F3XMnpiqBw3votZBBwoyq8  |  Save key: egglair.save.v2 (bump if the save shape changes)
+How to resume: Artifact read -> `head -40` this file -> do ONE stage -> `node --check` the script -> publish to the same url with title "Egg Lair vX.Y" (Josh wants the version in the title) -> update this log -> stop and report.
+Code map: script sections are marked "// ================= name =================": utils, data (ENEMIES, SPELLS, SHOP, MAPS, AUTO_DELAY), save, audio, state (S), level setup (startLevel builds routes), waves (genWave), dragons, enemies (updateEnemy, retreatRoute), eggs/spells/fx (updateDropped, castSpell), main update, background, sprites, frame, HUD and panel, screens (shop), input, loop.
+
+Requested enhancements (Josh, 1 Oct 2026):
+ a. More complex routes                                   -> Stage 3a DONE
+ b. More strategic dragon placement (pads)                -> Stage 3a DONE (pad runes, variant-specific coverage)
+ c. Raiders reaching a dropped egg grab it and turn back   -> Stage 1 DONE
+ d. Colour-on-spot and upgrade timing matter more at higher levels -> Stage 2 DONE (weakness scaling, adaptive waves)
+ e. 3x speed option                                        -> Stage 1 DONE
+ f. Egg auto-return slightly slower                        -> Stage 1 DONE
+ g. Harder overall; repeat strategies should stop working -> Stage 2 DONE (curve + adaptive waves), tuning in Stage 3
+ h. Spells scale with level; higher tiers in the shop (e.g. Ice Up II/III) -> Stage 2 DONE
+
+Stage log:
+ 1 DONE v1.1: speed cycles 1x/2x/3x; AUTO_DELAY 7/5/3.5s, roll-home 1.25s; retreatRoute(): raider that picks up a dropped egg pauses 0.4s then walks back the way it came.
+ 2 DONE v1.2 (Josh merged old stages 2+4): spell tiers 1-3 (SP table, spellTier/spellCdFor, SPELL_REQ gating by levels cleared, save migration true->1); per-enemy weak/resist with weakMult/resistMult scaling by S.L (damage()); adaptWave(): raiders swap in resisting types when 60%+ of dragons share a colour (L5+); next-wave preview (#preview, updatePreview); harder curve: hp L-factor 0.05 and wave 0.07, meat 0.008, start meat 200+8L. NOT YET SIM-TESTED: stage 3 must verify every level is winnable.
+ 3a DONE v1.3: MAPS[].variants (paths/outPaths/addPads/blurb), pickVariant(): levels 1-3 base layout, then rotate (base, v1, v2); Endless uses the last variant; S.map = base merged with variant. Pad runes: pads[].b = 'range' (+15% range) or 'power' (+15% dmg/burn/venom) via padBonus() in dragonStats; drawPad rune ring; info panel note.
+ 3b DONE v1.4: balance pass with a headless auto-player (harness: strip the IIFE, stub document/canvas/localStorage in node vm, call startLevel/placeDragon/upgradeDragon/castSpell/update at dt=1/20; player picks pads by route coverage, colour by weakness over the next 3 waves, taps eggs at 0.35s, uses spells; shop profile scales with level). Tuning landed: hp L-factor 0.055, wave 0.07; kill meat x(1+0.004L), start meat 180+6L, wave bonus (15+2w)(1+0.006L); map diffs 1 / 0.9 / 1.25 with MAPS[0].ramp 0.02 per level index; map 2 variants carry their own diff (1.18, 1.12) and the three-gate layout has 2 extra pads. Result: all 48 levels won by the auto-player (eggs 1-8 left; map 0 tense from level 6, map 2 tight), Nightmare on the edge, Endless reaches wave 30+. Human play will be harder than the sim (it never mis-places or misses an egg tap).
+ALL REQUESTED STAGES COMPLETE.
+ 4 DONE v1.5: save codes. normaliseSave() shared by loadSave and import; saveCode()/parseSaveCode() ('EGG1.' + base64 JSON + '.' + djb2 hash6); transferScreen() from the title screen's Save code button (copy, paste, two-tap import confirm); help text updated. Progress is per browser (localStorage), codes move it between the Claude-hosted copy, GitHub Pages and other devices.
+ 5 DONE v1.6: speed cycles 1x/2x/3x/4x (loop runs update() S.speed times per frame); autoDelay(tier, L) scales AUTO_DELAY by 1 + 0.0125*(L-1), capped 1.6x; shop desc shows the level-48 figure.
+ 6 DONE v1.7: spells cost meat to cast (SPELLS[].meat, spellCost() +1%/level, checked in castSpell, shown on the HUD card and in the shop); feel items: SFX.roar on place/grow, SFX.cheer + 'Huzzah!' on a nest grab, nest eggs shiver when a raider is within 3.2 tiles (drawNestEggs), procedural music loop (MUSIC/musicStart/musicStop, toggle in the pause menu, S.save.music). Rebalanced for no-spell play (sim: grow-first auto-player, no spells, wins all 48): start meat 180+16L, kill meat x(1+0.01L), hp L-factor 0.045 and wave 0.06, map diffs 1 (ramp .015) / 0.78 (ramp .01) / 1.0 (ramp .012); variant diffs: map0 back door 0.8, map1 right gate 0.72 (+pad 10.3,3.6), map2 right descent 0.85 (+pad 10.8,11.8), three gates 0.92. Watch list from the sim: L17-18 and L27 (right gate) are tight; map 0 may now be easy for a sharp player.
+ 7 DONE v1.8: dragons pivot slower (4.4 rad/s, fire gate 0.35 rad; 3.8 cost a marginal level) and sweep when idle; 'breath' effect pushed from shoot() and drawn in drawOver (tapered gradient wedge + flicker dots, additive for fire); SKILLS table + skillIcon() canvas icons (flame/splash/snow/ring/drop/cloud) on buy cards (icons) and the info panel (icons + names, lit when unlocked); wave strip: portrait() draws the enemy sprite onto a 32px canvas by swapping ctx/T, #preview shows portraits with count badges, weakness colour bars, adapt note and the auto-call countdown. Declined by Josh: dragon health, bosses, map-path level select, less gold.
+ 8 DONE v1.9: cloud save via the artifact runtime (capabilities db+user declared at publish; cloudInit() reads data/users/<id>/save, keeps whichever of local/remote scores higher by saveScore(), persist() debounces cloudPush()); local storage stays the fallback for GitHub Pages. AUTO_DELAY 30/24/18s (+0.6%/level, cap 1.3x). Harder: hp L-factor 0.05, wave 0.065; map diffs 1.2 (ramp .025) / 0.78 (ramp .01) / 0.95 (ramp .012); variants: map0 shortcut 1.1, back door 0.95, map1 right gate 0.58 (route lengthened to start at y 0.9), map2 right descent 0.78, three gates 0.92. Sim (bot taps eggs after 2s, no spells): zero shop upgrades = 3 stars on map 0 levels 1-5 only, 1-2 stars after; with level-scaled upgrades all 48 winnable, 3 stars rare on maps 1-2; watch list: L24 (map 1 right gate) still lost by the bot. Josh wants exactly this: replay early levels after upgrading for 3 stars.
+ 9 DONE v2.0: three difficulty tiers (DIFF table: easy 0.75 hp/1.2 meat/0.6 gold/2-star cap, normal, hard 1.45 hp/1.1 spd/0.9 meat/1.6 gold/elite waves) chosen on the title and level screens (diffPickerHtml/bindDiffPicker), saved as save.diff; old Nightmare toggle removed, nightmare saves migrate to Hard; S.nightmare now just means elite wave gen. Speed button moved out of the top HUD into the bottom panel as a tall 60px button beside the rows (#panel is now a row: #rows + .speed).
+ 10 DONE v2.1: cloud save made explicit and diagnosable: cloudInit() asks permissions.request(['db','user']) when state is 'prompt', records state/why (on, denied, off: not inside Claude / not available in this view, error:<code>), title screen shows the status line (green when on, with seconds since last push) and an Allow button (permissions.manage) when denied; New game screen (two-tap wipe, keeps difficulty/sound settings, offers a save code first). Josh reported progress still resetting when launching from the chat; the status line is how to tell whether the runtime is granting db in his view.
+Next work (if any) starts a new log entry here.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Egg Lair">
+<meta name="theme-color" content="#120c0a">
+<title>Egg Lair</title>
+<style>
+  :root{
+    --bg:#120c0a; --panel:#1c1512; --line:#4a3a30; --bone:#eadfc6; --dim:#a8977f;
+    --gold:#f5c542; --meat:#e0703a; --fire:#ff6a2b; --ice:#7fd0ff; --poison:#8ef04a;
+    --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+  html,body{margin:0;height:100%;width:100%;position:fixed;overflow:hidden;background:var(--bg);color:var(--bone);
+    font-family:"Trebuchet MS","Avenir Next",Avenir,"Segoe UI",Helvetica,Arial,sans-serif;touch-action:none}
+  #app{position:absolute;inset:0;display:flex;flex-direction:column;padding-top:var(--sat);padding-bottom:var(--sab)}
+  #hud{height:50px;flex:none;display:flex;align-items:center;gap:10px;padding:0 10px;
+    background:linear-gradient(#2a1f1a,#1a120f);border-bottom:2px solid var(--line);font-weight:700;font-size:15px}
+  .stat{display:flex;align-items:center;gap:5px;white-space:nowrap}
+  .ico{width:18px;height:18px;display:inline-block;background-repeat:no-repeat;background-size:contain}
+  .ico.meat{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M3 17l4-4' stroke='%23eadfc6' stroke-width='3' stroke-linecap='round'/%3E%3Ccircle cx='11.5' cy='8.5' r='5.5' fill='%23e0703a'/%3E%3Ccircle cx='9.5' cy='7' r='1.6' fill='%23f7b48a'/%3E%3C/svg%3E")}
+  .ico.egg{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cellipse cx='10' cy='11' rx='6.2' ry='8' fill='%23f3e9d2'/%3E%3Ccircle cx='8' cy='8' r='1.2' fill='%23c9b48a'/%3E%3Ccircle cx='12' cy='13' r='1' fill='%23c9b48a'/%3E%3C/svg%3E")}
+  .spacer{flex:1}
+  button{font:inherit;color:inherit;background:#3a2a20;border:2px solid #6b5240;border-radius:10px;padding:8px 12px;font-weight:700;line-height:1.1}
+  button.primary{background:#7a2e14;border-color:#e0662a}
+  button:active{transform:translateY(1px)}
+  button:disabled{opacity:.4}
+  button.mini{padding:5px 9px;font-size:13px;border-radius:8px}
+  #stage{flex:1;position:relative;overflow:hidden;background:#0b0806;min-height:0}
+  canvas#game{position:absolute;left:0;top:0;touch-action:none}
+  #wavebar{position:absolute;left:0;right:0;bottom:8px;display:flex;flex-direction:column;align-items:center;gap:5px;pointer-events:none}
+  #preview{background:rgba(10,6,4,.84);border:1px solid #4a3a30;border-radius:14px;padding:4px 10px;color:var(--bone);max-width:94%;display:flex;align-items:center;gap:8px}
+  #preview .lbl{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
+  #preview .pt{position:relative;display:flex;flex-direction:column;align-items:center}
+  #preview .pt img{width:32px;height:32px;display:block}
+  #preview .pt b{position:absolute;top:-3px;right:-7px;background:#1a110d;border:1px solid #4a3a30;border-radius:999px;font-size:10px;line-height:1;padding:2px 4px}
+  #preview .pt i{display:block;width:20px;height:3px;border-radius:2px;margin-top:1px}
+  #preview .ad{font-size:10px;color:#ff9a5a;max-width:64px;line-height:1.1}
+  #preview .cdn{font-weight:700;font-size:15px;min-width:30px;text-align:right}
+  #modal textarea{width:100%;min-height:72px;box-sizing:border-box;background:#1a110d;color:var(--bone);border:1px solid #4a3a30;border-radius:8px;padding:8px;font:12px/1.4 ui-monospace,Menlo,monospace;resize:vertical;word-break:break-all}
+  #wavebar button{pointer-events:auto;box-shadow:0 2px 10px rgba(0,0,0,.7);animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{box-shadow:0 2px 10px rgba(0,0,0,.7)}50%{box-shadow:0 2px 16px rgba(224,102,42,.8)}}
+  #panel{height:136px;flex:none;background:linear-gradient(#1f1713,#150f0c);border-top:2px solid var(--line);
+    padding:6px 8px;display:flex;flex-direction:row;gap:8px}
+  #rows{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+  .speed{flex:none;width:60px;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:24px;font-weight:800;line-height:1;padding:0;background:#2a1f1a}
+  .speed small{font-size:10px;font-weight:400;color:var(--dim);margin-top:4px;letter-spacing:.04em}
+  .speed.fast{border-color:var(--gold);color:var(--gold)}
+  .row{display:flex;gap:6px;align-items:stretch;min-height:0;flex:1}
+  .card{flex:1;background:#2a1f1a;border:2px solid #4a3a30;border-radius:10px;padding:4px 6px;text-align:center;
+    font-size:12px;line-height:1.15;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+  .card b{font-size:13px}
+  .card .cost{color:var(--meat)}
+  .card.sel{border-color:var(--gold);background:#3a2a20}
+  .card.dis{opacity:.45}
+  .dot{width:14px;height:14px;border-radius:50%;display:inline-block;box-shadow:0 0 6px currentColor}
+  .skills{display:flex;justify-content:center;gap:6px;margin:2px 0}
+  .diff{margin-top:10px}
+  button.tiny{padding:4px 8px;font-size:11px;border-radius:7px;font-weight:600}
+  .savestate{font-size:12px;margin:8px 0 0;color:var(--dim)}
+  .savestate.on{color:#8ef04a}
+  .savestate.denied,.savestate.error{color:#ff9a5a}
+  .diff .btns{gap:6px}
+  .diff button{padding:6px 10px;font-size:13px;opacity:.75}
+  .diff button.on{opacity:1;border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
+  .diffdesc{color:var(--dim);font-size:12px;margin:6px 0 0}
+  .skills .sk img{width:16px;height:16px;display:block}
+  .skills.named{justify-content:flex-start;gap:10px;margin:3px 0 2px}
+  .skills.named .sk{display:flex;align-items:center;gap:4px}
+  .skills.named .sk img{width:18px;height:18px}
+  .skills.named em{font-style:normal;font-size:11px;line-height:1.1;display:flex;flex-direction:column}
+  .skills.named em small{font-size:9px;color:var(--dim)}
+  .skills .sk.dim em{color:var(--dim)}
+  .spell{flex:none;width:64px;position:relative;overflow:hidden;font-size:11px}
+  .spell b{font-size:11px}
+  .spell .mc{display:block;font-size:9px;color:var(--dim);margin-top:1px}
+  .spell.poor .mc{color:#ff9a5a}
+  .spell .cd{position:absolute;left:0;bottom:0;width:100%;height:0;background:rgba(0,0,0,.65);pointer-events:none}
+  .hint{flex:1;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:12px;text-align:center}
+  .info{flex:1;text-align:left;font-size:12px;line-height:1.2;display:flex;flex-direction:column;justify-content:center;min-width:0}
+  .info small{color:var(--dim);display:block}
+  #infoRow button{padding:6px 8px;font-size:12px;border-radius:8px}
+  .hidden{display:none!important}
+  #overlay{position:absolute;inset:0;background:rgba(8,5,4,.88);display:flex;align-items:center;justify-content:center;
+    padding:calc(var(--sat) + 12px) 14px calc(var(--sab) + 12px);z-index:10}
+  .modal{width:100%;max-width:430px;background:#1e1613;border:2px solid #5a4638;border-radius:16px;padding:16px;
+    max-height:100%;overflow:auto;-webkit-overflow-scrolling:touch}
+  h1{margin:0 0 4px;font-size:34px;letter-spacing:2px;color:var(--gold);text-align:center;text-shadow:0 2px 0 #5a3a10,0 4px 12px rgba(0,0,0,.6)}
+  h2{margin:0 0 10px;font-size:20px;color:var(--gold)}
+  p{margin:6px 0;line-height:1.35;font-size:14px;color:#d9ccb3}
+  p.center{text-align:center}
+  .bigstars{text-align:center;font-size:34px;color:var(--gold);margin:4px 0;letter-spacing:4px}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .lvl{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    border-radius:10px;background:#2a1f1a;border:2px solid #4a3a30;font-weight:700;font-size:18px}
+  .lvl.lock{opacity:.3}
+  .stars{font-size:11px;color:var(--gold);letter-spacing:1px}
+  .maps{display:flex;flex-direction:column;gap:10px}
+  .mapcard{display:flex;gap:12px;align-items:center;background:#2a1f1a;border:2px solid #4a3a30;border-radius:12px;padding:8px}
+  .mapcard canvas{width:72px;height:96px;border-radius:8px;flex:none}
+  .mapcard small{display:block;color:var(--dim);margin:2px 0}
+  .shop .item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #3a2a22}
+  .shop .item small{display:block;color:var(--dim);font-size:12px;line-height:1.25}
+  .shop .item button{flex:none;min-width:64px;color:var(--gold)}
+  .shop .item button:disabled{color:var(--dim)}
+  .tier{color:var(--gold);font-size:12px}
+  .btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:12px}
+  .chk{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--dim);margin:0 0 10px}
+  .chk input{width:18px;height:18px}
+  .help b{color:var(--gold)}
+  .help p{font-size:13px}
+  .swatch{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px}
+  @media (prefers-reduced-motion: reduce){#wavebar button{animation:none}}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div class="stat"><span class="ico meat"></span><span id="meat">0</span></div>
+    <div class="stat"><span class="ico egg"></span><span id="eggs">0/0</span></div>
+    <div class="stat">Wave <span id="wave">0/0</span></div>
+    <div class="spacer"></div>
+    <button class="mini" id="pauseBtn">❚❚</button>
+  </div>
+  <div id="stage">
+    <canvas id="game"></canvas>
+    <div id="wavebar" class="hidden"><div id="preview" class="hidden"></div><button id="nextBtn" class="primary">Start</button></div>
+  </div>
+  <div id="panel">
+    <div id="rows">
+      <div class="row" id="buildRow"></div>
+      <div class="row hidden" id="infoRow"></div>
+      <div class="row" id="spellRow"></div>
+    </div>
+    <button id="speedBtn" class="speed">1×<small>speed</small></button>
+  </div>
+</div>
+<div id="overlay" class="hidden"><div class="modal" id="modal"></div></div>
+<script>
+(() => {
+'use strict';
+// ================= utils =================
+const $ = id => document.getElementById(id);
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+function rng(seed) { let a = seed >>> 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function cumLens(pts) { const c = [0]; for (let i = 1; i < pts.length; i++) c.push(c[i - 1] + dist(pts[i - 1], pts[i])); return c; }
+function posAlong(pts, cum, d) {
+  const n = pts.length;
+  if (d <= 0) { const a = pts[0], b = pts[1]; return { x: a.x, y: a.y, ang: Math.atan2(b.y - a.y, b.x - a.x) }; }
+  if (d >= cum[n - 1]) { const a = pts[n - 2], b = pts[n - 1]; return { x: b.x, y: b.y, ang: Math.atan2(b.y - a.y, b.x - a.x) }; }
+  let i = 1; while (cum[i] < d) i++;
+  const a = pts[i - 1], b = pts[i], t = (d - cum[i - 1]) / (cum[i] - cum[i - 1]);
+  return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), ang: Math.atan2(b.y - a.y, b.x - a.x) };
+}
+function distToSeg(p, a, b) { const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy; let t = l2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2 : 0; t = clamp(t, 0, 1); return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t)); }
+function distToPath(p, pts) { let m = 1e9; for (let i = 1; i < pts.length; i++) m = Math.min(m, distToSeg(p, pts[i - 1], pts[i])); return m; }
+function angDiff(a, b) { let d = b - a; while (d > Math.PI) d -= TAU; while (d < -Math.PI) d += TAU; return d; }
+function turnTo(a, b, max) { return a + clamp(angDiff(a, b), -max, max); }
+
+// ================= data =================
+const COLS = 12, ROWS = 16, SAVE_KEY = 'egglair.save.v2', LPM = 16;
+const AUTO_DELAY = [0, 30, 24, 18]; // seconds before a dropped egg rolls home by itself: a bit less than one wave, so tapping is the real defence
+// Auto-return waits a little longer on higher levels: +0.6% per level, capped at 1.3x (level 48 tier 3 = 23s).
+const autoDelay = (tier, L) => AUTO_DELAY[tier] * Math.min(1.3, 1 + 0.006 * ((L || 1) - 1));
+const EL = { fire: { name: 'Fire', col: '#ff6a2b' }, ice: { name: 'Ice', col: '#7fd0ff' }, poison: { name: 'Poison', col: '#8ef04a' } };
+const DCOL = {
+  fire:   { body: '#c8341f', belly: '#f5a04a', wing: '#8e1f12', dark: '#5a120a', glow: '#ffb347' },
+  ice:    { body: '#3a7fd6', belly: '#bfe6ff', wing: '#245a9c', dark: '#153d6e', glow: '#c8f0ff' },
+  poison: { body: '#3f9d3a', belly: '#c9f06a', wing: '#2b6e28', dark: '#174a16', glow: '#b6ff5a' },
+};
+const STAGE = ['Young', 'Adult', 'Giant'];
+const DRAGONS = {
+  fire:   { cost: [100, 120, 200], dmg: [18, 34, 62], rate: [1.0, 1.05, 1.1], range: [3.2, 3.4, 3.6], burn: [0, 4, 8], splash: [0, 0, 1.0],
+            desc: ['Hot breath, best raw damage.', 'Adult: humans it hits keep burning.', 'Giant: fireballs splash nearby humans.'] },
+  ice:    { cost: [80, 100, 170], dmg: [10, 18, 30], rate: [1.15, 1.2, 1.25], range: [3.0, 3.2, 3.4], slow: [0.4, 0.5, 0.55], freeze: [0, 0.15, 0.25], nova: [0, 0, 8],
+            desc: ['Slows whatever it hits.', 'Adult: chance to freeze solid.', 'Giant: frost nova freezes everyone in range.'] },
+  poison: { cost: [90, 110, 190], dmg: [8, 12, 18], rate: [0.9, 0.95, 1.0], range: [2.6, 2.8, 3.0], dot: [4, 8, 12], aura: [0, 0, 1.5],
+            desc: ['Venom keeps hurting and ignores armour.', 'Adult: stronger, stacking venom.', 'Giant: toxic cloud around the dragon.'] },
+};
+// Named skills unlocked at adult (stage 1) and giant (stage 2), shown as icons on the cards.
+const SKILLS = {
+  fire:   [{ n: 'Burn', i: 'flame' }, { n: 'Splash', i: 'splash' }],
+  ice:    [{ n: 'Freeze', i: 'snow' }, { n: 'Frost nova', i: 'ring' }],
+  poison: [{ n: 'Venom', i: 'drop' }, { n: 'Miasma', i: 'cloud' }],
+};
+const ICONS = {};
+function skillIcon(kind, col, lit) {
+  const key = kind + col + lit; if (ICONS[key]) return ICONS[key];
+  const P = 40, cv = document.createElement('canvas'); cv.width = P; cv.height = P; const c = cv.getContext('2d'); c.translate(P / 2, P / 2);
+  c.globalAlpha = lit ? 1 : 0.38; c.fillStyle = col; c.strokeStyle = col; c.lineWidth = 3; c.lineCap = 'round';
+  if (kind === 'flame') { c.beginPath(); c.moveTo(0, -16); c.bezierCurveTo(12, -4, 14, 6, 6, 14); c.bezierCurveTo(2, 17, -4, 17, -8, 13); c.bezierCurveTo(-15, 5, -8, -2, -4, -8); c.bezierCurveTo(-2, -3, 1, -3, 0, -16); c.fill(); }
+  else if (kind === 'splash') { c.beginPath(); c.arc(0, 0, 6, 0, TAU); c.fill(); for (let i = 0; i < 3; i++) { const a = -Math.PI / 2 + i * TAU / 3; c.beginPath(); c.arc(Math.cos(a) * 13, Math.sin(a) * 13, 3.5, 0, TAU); c.fill(); } }
+  else if (kind === 'snow') { for (let i = 0; i < 3; i++) { const a = i * Math.PI / 3; c.beginPath(); c.moveTo(Math.cos(a) * 15, Math.sin(a) * 15); c.lineTo(-Math.cos(a) * 15, -Math.sin(a) * 15); c.stroke(); } c.beginPath(); c.arc(0, 0, 4, 0, TAU); c.fill(); }
+  else if (kind === 'ring') { c.beginPath(); c.arc(0, 0, 13, 0, TAU); c.stroke(); c.beginPath(); c.arc(0, 0, 4, 0, TAU); c.fill(); }
+  else if (kind === 'drop') { c.beginPath(); c.moveTo(0, -15); c.bezierCurveTo(10, -2, 12, 6, 6, 12); c.bezierCurveTo(2, 16, -2, 16, -6, 12); c.bezierCurveTo(-12, 6, -10, -2, 0, -15); c.fill(); }
+  else { for (const [x, y, r] of [[-7, 3, 7], [3, 1, 9], [9, 5, 6], [0, 7, 7]]) { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); } }
+  return ICONS[key] = cv.toDataURL();
+}
+// icons + names for a dragon type; `stage` lights the skills already unlocked
+const skillHtml = (el, stage, names) => SKILLS[el].map((k, i) => `<span class="sk${stage > i ? '' : ' dim'}"><img src="${skillIcon(k.i, EL[el].col, stage > i)}" alt="">${names ? `<em>${k.n}<small>${stage > i ? '' : i ? 'giant' : 'adult'}</small></em>` : ''}</span>`).join('');
+const ENEMIES = {
+  peasant:   { name: 'Peasant',   hp: 60,  spd: 1.0,  meat: 5,  col: '#c98b5a', unlock: 1,  cost: 1,   weight: 3.0, tip: 'Slow, weak, plentiful.' },
+  thief:     { name: 'Thief',     hp: 50,  spd: 1.75,  meat: 7,  col: '#3b3b4f', unlock: 2,  cost: 1.5, weight: 1.3, invis: true, weak: 'ice', resist: 'poison', tip: 'Fast, and vanishes for seconds at a time. Weak to ice, shrugs off poison.' },
+  knight:    { name: 'Knight',    hp: 220, spd: 0.7,  meat: 14, col: '#9aa3ad', unlock: 3,  cost: 3,   weight: 1.0, armor: 0.45, weak: 'poison', resist: 'ice', tip: 'Armour blocks most fire and ice. Poison gets through and hurts him badly.' },
+  mage:      { name: 'Mage',      hp: 120, spd: 1.0,  meat: 10, col: '#7b4fb8', unlock: 4,  cost: 2,   weight: 1.2, immune: ['fire'], weak: 'ice', resist: 'poison', tip: 'Immune to fire. Weak to ice, resists poison.' },
+  priest:    { name: 'Priest',    hp: 150, spd: 0.9,  meat: 12, col: '#e9e2d0', unlock: 5,  cost: 2.5, weight: 1.0, heal: 0.03, weak: 'fire', resist: 'ice', tip: 'Heals himself as he walks. Fire burns through the healing; cold barely bothers him.' },
+  ranger:    { name: 'Ranger',    hp: 95,  spd: 1.45, meat: 8,  col: '#4f8a3b', unlock: 6,  cost: 1.6, weight: 1.3, weak: 'fire', resist: 'poison', tip: 'Quick on his feet. Weak to fire, resists poison.' },
+  barbarian: { name: 'Barbarian', hp: 330, spd: 1.1,  meat: 16, col: '#b5451b', unlock: 8,  cost: 4,   weight: 0.8, rage: true, weak: 'poison', resist: 'fire', tip: 'Tough, and sprints once wounded. Venom works; fire barely marks him.' },
+  druid:     { name: 'Druid',     hp: 420, spd: 0.8,  meat: 20, col: '#6e5a2e', unlock: 10, cost: 5,   weight: 0.7, immune: ['poison'], slowRes: 0.5, weak: 'fire', resist: 'ice', tip: 'Master of magic. Venom can\'t touch him and cold barely slows him. Fire is the answer.' },
+};
+// Weakness and resistance bite harder as levels rise, so dragon colour per spot matters more late on.
+const weakMult = L => Math.min(1.75, 1.35 + 0.012 * L), resistMult = L => Math.max(0.45, 0.8 - 0.009 * L);
+// Spell tiers (1 to 3): each tier adds power and cuts the cooldown by 15%.
+const SP = {
+  rainDmg: t => 90 + 55 * (t - 1), rainR: t => 1.7 + 0.3 * (t - 1), freeze: t => 3 + 1.25 * (t - 1),
+  cripF: t => [0.5, 0.4, 0.3][t - 1], cripT: t => 8 + 3 * (t - 1), wrathM: t => [2, 2.5, 3][t - 1], wrathT: t => 8 + 3 * (t - 1), meteorDmg: t => 110 + 60 * (t - 1),
+};
+const SPELLS = {
+  sp_firerain: { name: 'Fire rain',        short: 'Fire rain', cd: 25, meat: 60,  aim: true, col: '#ff8a3a', desc: 'Tap the map to rain fire on an area', tdesc: t => `Tap the map: ${SP.rainDmg(t)} fire damage in a ${SP.rainR(t).toFixed(1)} tile radius` },
+  sp_iceup:    { name: 'Ice up',           short: 'Ice up',    cd: 35, meat: 90,  col: '#bfe9ff', desc: 'Freeze every human for 3 seconds', tdesc: t => `Freeze every human for ${+SP.freeze(t).toFixed(2)}s` },
+  sp_cripple:  { name: 'Crippling poison', short: 'Cripple',   cd: 30, meat: 80,  col: '#8ef04a', desc: 'Slow every human for 8 seconds', tdesc: t => `Every human moves at ${Math.round(SP.cripF(t) * 100)}% speed for ${SP.cripT(t)}s` },
+  sp_wrath:    { name: 'Dragon wrath',     short: 'Wrath',     cd: 40, meat: 110, col: '#ff5c5c', desc: 'Every dragon deals double damage for 8 seconds', tdesc: t => `Dragons deal ${SP.wrathM(t)}x damage for ${SP.wrathT(t)}s` },
+  sp_meteor:   { name: 'Meteor rain',      short: 'Meteor',    cd: 45, meat: 130, col: '#ffc247', desc: 'Fire falls on every human on the map', tdesc: t => `${SP.meteorDmg(t)} fire damage to every human on the map` },
+  sp_restore:  { name: 'Egg restore',      short: 'Restore',   cd: 60, meat: 160, col: '#fff3b0', desc: 'Every egg returns to the nest at once', tdesc: t => 'Every egg returns to the nest at once' },
+};
+const spellTier = id => S.save.spells[id] | 0;
+const spellCdFor = (id, t) => Math.round(SPELLS[id].cd * (1 - 0.15 * (t - 1)));
+// Casting costs meat (the original made spells a rare luxury): base cost, +1% per level.
+const spellCost = (id, L) => Math.round(SPELLS[id].meat * (1 + 0.01 * ((L || S.L || 1) - 1)));
+const SPELL_REQ = [0, 6, 16]; // levels cleared before tier 1, 2, 3 can be bought
+const cleared = () => S.save.stars.reduce((a, m) => a + m.filter(x => x > 0).length, 0);
+const SHOP = [
+  { id: 'fire',   name: 'Fire dragon skills',   max: 5, cost: [80, 160, 300, 500, 800], desc: t => `+${12 * t}% damage and burn, +${(0.05 * t).toFixed(2)} range` },
+  { id: 'ice',    name: 'Ice dragon skills',    max: 5, cost: [80, 160, 300, 500, 800], desc: t => `+${12 * t}% damage, +${3 * t}% slow, +${(0.05 * t).toFixed(2)} range` },
+  { id: 'poison', name: 'Poison dragon skills', max: 5, cost: [80, 160, 300, 500, 800], desc: t => `+${12 * t}% damage and venom, +${(0.05 * t).toFixed(2)} range` },
+  { id: 'eggs',   name: 'Bigger nest',          max: 3, cost: [150, 300, 500], desc: t => `Nest holds ${5 + t} eggs` },
+  { id: 'auto',   name: 'Egg auto-return',      max: 3, cost: [120, 250, 450], desc: t => t ? `Dropped eggs roll home after ${AUTO_DELAY[t]}s on level 1, a little longer on higher levels (${+autoDelay(t, 48).toFixed(1)}s by level 48)` : 'Dropped eggs only return when you tap them' },
+  { id: 'sp_firerain', spell: true, name: 'Fire rain',        max: 3, cost: [100, 220, 400] },
+  { id: 'sp_iceup',    spell: true, name: 'Ice up',           max: 3, cost: [150, 300, 520] },
+  { id: 'sp_cripple',  spell: true, name: 'Crippling poison', max: 3, cost: [250, 420, 650] },
+  { id: 'sp_wrath',    spell: true, name: 'Dragon wrath',     max: 3, cost: [350, 550, 800] },
+  { id: 'sp_meteor',   spell: true, name: 'Meteor rain',      max: 3, cost: [450, 700, 1000] },
+  { id: 'sp_restore',  spell: true, name: 'Egg restore',      max: 3, cost: [500, 750, 1100] },
+];
+
+// Maps are in tile units, 12 wide by 16 tall. Paths run from a door to the nest.
+const MAPS = [
+  { name: 'Old Dungeon', blurb: 'One gate. Humans walk in, grab an egg and walk the same corridors back out.', seed: 11, rock: '#2c221c', diff: 1.2, ramp: 0.025,
+    nest: { x: 8.8, y: 3.5 },
+    paths: [[{ x: -0.9, y: 13.5 }, { x: 2.5, y: 13.5 }, { x: 2.5, y: 9.5 }, { x: 6.5, y: 9.5 }, { x: 6.5, y: 12.5 }, { x: 9.5, y: 12.5 }, { x: 9.5, y: 6.5 }, { x: 3.5, y: 6.5 }, { x: 3.5, y: 3.5 }, { x: 8.8, y: 3.5 }]],
+    pads: [{ x: 4.5, y: 11.5 }, { x: 1.2, y: 11 }, { x: 8.2, y: 8.5 }, { x: 4.8, y: 8, b: 'power' }, { x: 1.5, y: 5, b: 'range' }, { x: 5.8, y: 5 }, { x: 10.8, y: 9.5 }, { x: 6.2, y: 14.4 }, { x: 10.8, y: 4.8, b: 'range' }],
+    variants: [
+      { blurb: 'The humans have dug a shortcut: half of them cut straight up the middle.', diff: 1.1,
+        paths: [[{ x: -0.9, y: 13.5 }, { x: 2.5, y: 13.5 }, { x: 2.5, y: 9.5 }, { x: 6.5, y: 9.5 }, { x: 6.5, y: 12.5 }, { x: 9.5, y: 12.5 }, { x: 9.5, y: 6.5 }, { x: 3.5, y: 6.5 }, { x: 3.5, y: 3.5 }, { x: 8.8, y: 3.5 }],
+                [{ x: -0.9, y: 13.5 }, { x: 2.5, y: 13.5 }, { x: 2.5, y: 9.5 }, { x: 6.5, y: 9.5 }, { x: 6.5, y: 3.5 }, { x: 8.8, y: 3.5 }]] },
+      { blurb: 'A back door is open: egg carriers leave along the top wall, not the way they came.', diff: 0.95,
+        paths: [[{ x: -0.9, y: 13.5 }, { x: 2.5, y: 13.5 }, { x: 2.5, y: 9.5 }, { x: 6.5, y: 9.5 }, { x: 6.5, y: 12.5 }, { x: 9.5, y: 12.5 }, { x: 9.5, y: 6.5 }, { x: 3.5, y: 6.5 }, { x: 3.5, y: 3.5 }, { x: 8.8, y: 3.5 }]],
+        outPaths: [[{ x: 8.8, y: 3.5 }, { x: 8.8, y: 1.2 }, { x: 0.3, y: 1.2 }, { x: 0.3, y: 7.8 }, { x: -0.9, y: 7.8 }]],
+        addPads: [{ x: 4.5, y: 2.4 }, { x: 10.6, y: 1.8, b: 'power' }] },
+    ],
+    torches: [{ x: 0.7, y: 12.1 }, { x: 7.6, y: 11 }, { x: 10.7, y: 7.5 }, { x: 2.2, y: 4.6 }, { x: 6.2, y: 2.2 }, { x: 4.2, y: 15.2 }],
+    props: [{ k: 'skull', x: 10.6, y: 14.6 }, { k: 'bones', x: 0.8, y: 1.6 }, { k: 'bones', x: 11.2, y: 1.2 }, { k: 'skull', x: 1.2, y: 8.2 }] },
+  { name: 'Catacombs', blurb: 'In at the top, out at the bottom. Egg carriers never come back past your first dragons.', seed: 23, rock: '#26231f', diff: 0.78, ramp: 0.01,
+    nest: { x: 9.6, y: 8.5 },
+    paths: [[{ x: -0.9, y: 1.5 }, { x: 3.5, y: 1.5 }, { x: 3.5, y: 5.5 }, { x: 7.5, y: 5.5 }, { x: 7.5, y: 8.5 }, { x: 9.6, y: 8.5 }]],
+    outPaths: [[{ x: 9.6, y: 8.5 }, { x: 9.6, y: 11 }, { x: 5.5, y: 11 }, { x: 5.5, y: 14.5 }, { x: 2.5, y: 14.5 }, { x: 2.5, y: 16.9 }]],
+    pads: [{ x: 5.5, y: 3.3 }, { x: 1.5, y: 3.5 }, { x: 9.2, y: 4.6, b: 'range' }, { x: 6.5, y: 9.3, b: 'power' }, { x: 3.6, y: 9.2 }, { x: 11, y: 10.3 }, { x: 7.6, y: 13 }, { x: 3.6, y: 12.9, b: 'range' }, { x: 1.4, y: 14.6 }],
+    variants: [
+      { blurb: 'A second gate has opened on the right. Raiders come from both sides.', diff: 0.58, addPads: [{ x: 10.3, y: 3.6, b: 'power' }],
+        paths: [[{ x: -0.9, y: 1.5 }, { x: 3.5, y: 1.5 }, { x: 3.5, y: 5.5 }, { x: 7.5, y: 5.5 }, { x: 7.5, y: 8.5 }, { x: 9.6, y: 8.5 }],
+                [{ x: 12.9, y: 0.9 }, { x: 11.2, y: 0.9 }, { x: 11.2, y: 6.5 }, { x: 9.6, y: 6.5 }, { x: 9.6, y: 8.5 }]],
+        outPaths: [[{ x: 9.6, y: 8.5 }, { x: 9.6, y: 11 }, { x: 5.5, y: 11 }, { x: 5.5, y: 14.5 }, { x: 2.5, y: 14.5 }, { x: 2.5, y: 16.9 }]] },
+      { blurb: 'The exit has moved to the bottom right. Your left-side dragons will never see a carrier.',
+        paths: [[{ x: -0.9, y: 1.5 }, { x: 3.5, y: 1.5 }, { x: 3.5, y: 5.5 }, { x: 7.5, y: 5.5 }, { x: 7.5, y: 8.5 }, { x: 9.6, y: 8.5 }]],
+        outPaths: [[{ x: 9.6, y: 8.5 }, { x: 9.6, y: 11 }, { x: 5.5, y: 11 }, { x: 5.5, y: 14.5 }, { x: 10.5, y: 14.5 }, { x: 10.5, y: 16.9 }]],
+        addPads: [{ x: 10.4, y: 12.6, b: 'power' }] },
+    ],
+    torches: [{ x: 1.2, y: 0.5 }, { x: 5.5, y: 4.6 }, { x: 8.8, y: 6.8 }, { x: 7.8, y: 10.2 }, { x: 4.4, y: 13.5 }, { x: 0.8, y: 9.5 }],
+    props: [{ k: 'skull', x: 11, y: 1.2 }, { k: 'bones', x: 0.8, y: 7.2 }, { k: 'skull', x: 8.5, y: 15.2 }, { k: 'bones', x: 11.2, y: 15.2 }] },
+  { name: 'Deep Lair', blurb: 'Two gates. Raiders come from both sides and meet in the middle corridor.', seed: 37, rock: '#22201f', diff: 0.95, ramp: 0.012,
+    nest: { x: 6, y: 13.8 },
+    paths: [[{ x: -0.9, y: 2.5 }, { x: 2.5, y: 2.5 }, { x: 2.5, y: 7.5 }, { x: 6, y: 7.5 }, { x: 6, y: 13.8 }],
+            [{ x: 12.9, y: 4.5 }, { x: 9.5, y: 4.5 }, { x: 9.5, y: 7.5 }, { x: 6, y: 7.5 }, { x: 6, y: 13.8 }]],
+    pads: [{ x: 4.3, y: 5 }, { x: 7.8, y: 5.5 }, { x: 1.2, y: 5.2, b: 'range' }, { x: 10.9, y: 7, b: 'range' }, { x: 4, y: 10 }, { x: 8, y: 10 }, { x: 3.6, y: 12.5 }, { x: 8.4, y: 12.5 }, { x: 6, y: 5.8, b: 'power' }],
+    variants: [
+      { blurb: 'The right-hand raiders have found their own way down. Nothing from the right passes the middle corridor now.', diff: 0.78,
+        paths: [[{ x: -0.9, y: 2.5 }, { x: 2.5, y: 2.5 }, { x: 2.5, y: 7.5 }, { x: 6, y: 7.5 }, { x: 6, y: 13.8 }],
+                [{ x: 12.9, y: 4.5 }, { x: 9.5, y: 4.5 }, { x: 9.5, y: 10.5 }, { x: 9.5, y: 13.8 }, { x: 6, y: 13.8 }]],
+        addPads: [{ x: 10.8, y: 11.8, b: 'range' }] },
+      { blurb: 'Three gates. A third band comes in low on the left, straight at the nest.',
+        paths: [[{ x: -0.9, y: 2.5 }, { x: 2.5, y: 2.5 }, { x: 2.5, y: 7.5 }, { x: 6, y: 7.5 }, { x: 6, y: 13.8 }],
+                [{ x: 12.9, y: 4.5 }, { x: 9.5, y: 4.5 }, { x: 9.5, y: 7.5 }, { x: 6, y: 7.5 }, { x: 6, y: 13.8 }],
+                [{ x: -0.9, y: 15.2 }, { x: 2, y: 15.2 }, { x: 2, y: 11 }, { x: 6, y: 11 }, { x: 6, y: 13.8 }]],
+        diff: 0.92, addPads: [{ x: 0.9, y: 13 }, { x: 4.2, y: 14.6, b: 'power' }] },
+    ],
+    torches: [{ x: 0.6, y: 1.2 }, { x: 11.4, y: 3.2 }, { x: 3.8, y: 8.6 }, { x: 8.2, y: 8.6 }, { x: 4.7, y: 12.2 }, { x: 7.3, y: 12.2 }],
+    props: [{ k: 'skull', x: 1, y: 14.6 }, { k: 'bones', x: 11, y: 14.6 }, { k: 'bones', x: 6, y: 1.2 }, { k: 'skull', x: 10.8, y: 1 }] },
+];
+// Variant pad lists are the base pads plus any extras. Levels 1-3 use the base layout; after that the layouts rotate, and Endless uses the last one.
+for (const m of MAPS) for (const v of m.variants || []) { v.pads = m.pads.concat(v.addPads || []); }
+function pickVariant(base, levelIdx, opts) { if (!base.variants) return 0; if (opts.endless) return base.variants.length; if (levelIdx < 3) return 0; return levelIdx % (base.variants.length + 1); }
+// Three difficulty tiers, chosen on the title or level screen and saved. Hard replaces the old Nightmare toggle (an old save with nightmare on migrates to Hard).
+const DIFF = {
+  easy:   { name: 'Easy',   hp: 0.75, spd: 1.0,  meat: 1.2, gold: 0.6, maxStars: 2, elites: false, desc: 'Weaker humans, more meat. Levels cap at two stars.' },
+  normal: { name: 'Normal', hp: 1.0,  spd: 1.0,  meat: 1.0, gold: 1.0, maxStars: 3, elites: false, desc: 'The game as designed. Three stars take upgrades.' },
+  hard:   { name: 'Hard',   hp: 1.45, spd: 1.1,  meat: 0.9, gold: 1.6, maxStars: 3, elites: true,  desc: 'Tougher, faster humans and more elites. 60% more gold.' },
+};
+const diffCur = () => DIFF[S.save && DIFF[S.save.diff] ? S.save.diff : 'normal'];
+const NEST_OFFS = [[0, 0.05], [0.55, 0.18], [-0.55, 0.18], [0.28, -0.42], [-0.28, -0.42], [0.3, 0.62], [-0.3, 0.62], [0, -0.85]];
+
+// ================= save =================
+function defaultSave() { return { gold: 0, tiers: { fire: 0, ice: 0, poison: 0 }, eggs: 0, auto: 0, spells: {}, stars: [[], [], []], endless: [0, 0, 0], diff: 'normal', muted: false }; }
+function normaliseSave(s) { const d = defaultSave(); const o = Object.assign(d, s, { tiers: Object.assign(d.tiers, s.tiers || {}), spells: Object.assign({}, s.spells || {}), stars: s.stars && s.stars.length === 3 ? s.stars : d.stars, endless: s.endless || d.endless }); for (const k in o.spells) if (o.spells[k] === true) o.spells[k] = 1; o.gold = Math.max(0, o.gold | 0); if (!DIFF[s.diff]) o.diff = s.nightmare ? 'hard' : 'normal'; delete o.nightmare; return o; }
+function loadSave() { try { const r = localStorage.getItem(SAVE_KEY); if (r) return normaliseSave(JSON.parse(r)); } catch (e) {} return defaultSave(); }
+// Save codes: "EGG1." + base64 of the save JSON + "." + checksum. Progress lives in one browser's storage, so this is how it moves between browsers, hosts and devices.
+const hash6 = str => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0; return h.toString(16).padStart(8, '0').slice(-6); };
+function saveCode() { const b = btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(S.save)))); return 'EGG1.' + b + '.' + hash6(b); }
+function parseSaveCode(code) {
+  const parts = (code || '').replace(/\s+/g, '').split('.'); if (parts.length !== 3 || parts[0] !== 'EGG1' || hash6(parts[1]) !== parts[2].toLowerCase()) return null;
+  try { const s = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(parts[1]), c => c.charCodeAt(0)))); return s && typeof s === 'object' && s.stars ? normaliseSave(s) : null; } catch (e) { return null; }
+}
+function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S.save)); } catch (e) {} cloudPush(); }
+// Cloud save: inside claude.ai the page's local storage can come back empty, so progress is also kept in the artifact's per-person database
+// (data/users/<id>/save, private to the viewer). On a plain web host (GitHub Pages) claude.use is absent and local storage alone is used.
+const CLOUD = { ref: null, timer: null, busy: false, dirty: false, state: 'starting', why: '', perms: null, lastPush: 0 };
+const cloudLabel = () => CLOUD.state === 'on' ? 'Cloud save on' + (CLOUD.lastPush ? ' (saved ' + Math.max(0, Math.round((Date.now() - CLOUD.lastPush) / 1000)) + 's ago)' : '') : CLOUD.state === 'starting' ? 'Cloud save: connecting' : 'Browser save only' + (CLOUD.why ? ' (' + CLOUD.why + ')' : '');
+const saveScore = s => s.stars.reduce((a, m) => a + m.reduce((x, y) => x + (y | 0), 0), 0) * 1000 + Object.values(s.tiers).reduce((a, b) => a + b, 0) * 50 + s.eggs * 50 + s.auto * 50 + Object.values(s.spells).reduce((a, b) => a + (b | 0), 0) * 50 + Math.min(999, s.gold | 0);
+async function cloudInit() {
+  const done = (state, why) => { CLOUD.state = state; CLOUD.why = why || ''; if (S.screen === 'title') titleScreen(); };
+  if (!(window.claude && typeof window.claude.use === 'function')) return done('off', 'not inside Claude');
+  try {
+    CLOUD.perms = await window.claude.use('permissions');
+    if (CLOUD.perms) {
+      let st = await CLOUD.perms.state();
+      if (st.db === 'prompt' || st.user === 'prompt') st = await CLOUD.perms.request(['db', 'user']);
+      if (st.db === 'denied' || st.user === 'denied') return done('denied', 'permission declined');
+      if (st.db === 'unavailable' || st.user === 'unavailable') return done('off', 'not available in this view');
+    }
+    const [db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]);
+    if (!db || !user) return done('off', 'not available in this view');
+    const uid = await user.id(); CLOUD.ref = db.doc('data/users/' + uid + '/save');
+    const snap = await CLOUD.ref.get();
+    if (snap.exists) {
+      const remote = normaliseSave(snap.data());
+      if (saveScore(remote) > saveScore(S.save)) { S.save = remote; try { localStorage.setItem(SAVE_KEY, JSON.stringify(S.save)); } catch (e) {} }
+      else if (saveScore(remote) < saveScore(S.save)) cloudPush();
+    } else cloudPush();
+    done('on');
+  } catch (e) { done('error', (e && e.code) || 'error'); }
+}
+function cloudPush() {
+  if (!CLOUD.ref) return; CLOUD.dirty = true; if (CLOUD.timer) return;
+  CLOUD.timer = setTimeout(async () => { CLOUD.timer = null; if (CLOUD.busy) { cloudPush(); return; } CLOUD.busy = true; CLOUD.dirty = false;
+    try { await CLOUD.ref.set(JSON.parse(JSON.stringify(S.save))); CLOUD.lastPush = Date.now(); } catch (e) { CLOUD.state = 'error'; CLOUD.why = (e && e.code) || 'write failed'; } CLOUD.busy = false; if (CLOUD.dirty) cloudPush(); }, 1200);
+}
+
+// ================= audio (tiny synth, no assets) =================
+const AU = { ctx: null, last: {} };
+function auInit() { if (AU.ctx) return; try { const C = window.AudioContext || window.webkitAudioContext; if (C) AU.ctx = new C(); } catch (e) {} }
+function auOk(key, gap) { if (!AU.ctx || S.save.muted) return false; if (AU.ctx.state === 'suspended') { try { AU.ctx.resume(); } catch (e) {} } const now = performance.now(); if (AU.last[key] && now - AU.last[key] < gap) return false; AU.last[key] = now; return true; }
+function tone(key, freq, dur, type, vol, slide) { if (!auOk(key, 60)) return; const c = AU.ctx, o = c.createOscillator(), g = c.createGain(); o.type = type; o.frequency.setValueAtTime(freq, c.currentTime); if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq * slide), c.currentTime + dur); g.gain.setValueAtTime(vol, c.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + dur); o.connect(g).connect(c.destination); o.start(); o.stop(c.currentTime + dur); }
+function noise(key, dur, vol, cutoff) { if (!auOk(key, 80)) return; const c = AU.ctx, n = c.sampleRate * dur | 0, b = c.createBuffer(1, n, c.sampleRate), d = b.getChannelData(0); for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n); const s = c.createBufferSource(); s.buffer = b; const g = c.createGain(); g.gain.value = vol; const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff || 900; s.connect(f).connect(g).connect(c.destination); s.start(); }
+const SFX = {
+  fire: () => noise('fire', 0.18, 0.05, 900),
+  ice: () => tone('ice', 1500, 0.12, 'triangle', 0.05, 0.5),
+  poison: () => tone('poison', 220, 0.16, 'sawtooth', 0.03, 0.6),
+  die: () => tone('die', 170, 0.2, 'square', 0.05, 0.3),
+  grab: () => tone('grab', 480, 0.16, 'square', 0.05, 1.5),
+  back: () => { tone('back', 660, 0.1, 'triangle', 0.06); setTimeout(() => tone('back2', 990, 0.16, 'triangle', 0.06), 90); },
+  lost: () => tone('lost', 220, 0.5, 'sawtooth', 0.07, 0.4),
+  build: () => tone('build', 330, 0.16, 'square', 0.05, 1.5),
+  roar: big => { noise('roarN', big ? 0.7 : 0.45, big ? 0.09 : 0.06, 420); tone('roar', big ? 70 : 95, big ? 0.75 : 0.5, 'sawtooth', big ? 0.1 : 0.07, 0.55); },
+  cheer: () => { [740, 880, 1109].forEach((f, i) => setTimeout(() => tone('cheer' + i, f, 0.14, 'triangle', 0.05, 1.08), i * 70)); },
+  spell: () => { noise('spell', 0.35, 0.07, 1400); tone('spell2', 300, 0.45, 'sine', 0.06, 2.2); },
+  tap: () => tone('tap', 880, 0.05, 'square', 0.03),
+  win: () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone('win' + i, f, 0.3, 'triangle', 0.07), i * 120)); },
+};
+
+// Music: a 2-bar A-minor loop (melody, bass, soft drum) scheduled a third of a second ahead; plays during levels unless muted or turned off in the pause menu.
+const MUSIC = { on: false, next: 0, step: 0, timer: null, bpm: 96 };
+const MEL = [57, 0, 60, 0, 64, 0, 60, 0, 57, 0, 55, 0, 52, 0, 55, 0, 57, 0, 60, 0, 64, 0, 67, 0, 65, 0, 64, 0, 60, 0, 59, 0];
+const BASS = [45, 0, 0, 0, 45, 0, 0, 0, 41, 0, 0, 0, 43, 0, 0, 0, 45, 0, 0, 0, 45, 0, 0, 0, 40, 0, 0, 0, 43, 0, 0, 0];
+const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+function mnote(c, f, t, d, type, vol) { const o = c.createOscillator(), g = c.createGain(); o.type = type; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + d + 0.05); }
+function musicTick() {
+  if (!MUSIC.on || !AU.ctx) return; const c = AU.ctx, spb = 60 / MUSIC.bpm / 4;
+  while (MUSIC.next < c.currentTime + 0.3) { const i = MUSIC.step % 32; if (MEL[i]) mnote(c, mtof(MEL[i]), MUSIC.next, spb * 1.9, 'triangle', 0.03); if (BASS[i]) mnote(c, mtof(BASS[i]), MUSIC.next, spb * 3.6, 'sawtooth', 0.022); if (i % 8 === 0) mnote(c, 55, MUSIC.next, spb * 0.9, 'sine', 0.05); MUSIC.next += spb; MUSIC.step++; }
+  MUSIC.timer = setTimeout(musicTick, 120);
+}
+function musicStart() { if (S.save.muted || S.save.music === false) return; auInit(); if (!AU.ctx) return; if (AU.ctx.state === 'suspended') { try { AU.ctx.resume(); } catch (e) {} } if (MUSIC.on) return; MUSIC.on = true; MUSIC.next = AU.ctx.currentTime + 0.05; MUSIC.step = 0; musicTick(); }
+function musicStop() { MUSIC.on = false; clearTimeout(MUSIC.timer); }
+
+// ================= state =================
+const S = { screen: 'title', save: null, map: null, mapIdx: 0, levelIdx: 0, L: 1, nightmare: false, endless: false, routes: [],
+  meat: 0, wave: 0, totalWaves: 0, waves: [], spawnQ: [], spawnT: 0, spawnIdx: 0, betweenT: 0, waveActive: false, started: false,
+  eggsTotal: 0, eggsNest: 0, eggsStolen: 0, dropped: [], dragons: [], enemies: [], shots: [], parts: [], texts: [], effects: [],
+  spellCd: {}, aiming: null, wrathT: 0, crippleT: 0, selPad: -1, selCard: null, selDragon: null, kills: 0, time: 0, speed: 1,
+  paused: false, over: false, won: false, goldLevel: 0, nextId: 1, banner: null, flashRed: 0 };
+let canvas, ctx, BG = null, T = 30, DPR = 1, CW = 360, CH = 480, lastHud = {}, cardEls = {}, spellEls = {};
+
+// ================= level setup =================
+function startLevel(mapIdx, levelIdx, opts) {
+  opts = opts || {};
+  const base = MAPS[mapIdx], vi = pickVariant(base, levelIdx, opts), variant = vi ? base.variants[vi - 1] : null;
+  const map = variant ? Object.assign({}, base, variant) : base;
+  S.mapIdx = mapIdx; S.levelIdx = levelIdx; S.map = map;
+  S.endless = !!opts.endless; S.nightmare = diffCur().elites;
+  S.L = mapIdx * LPM + (S.endless ? LPM : levelIdx + 1);
+  S.routes = map.paths.map((p, i) => {
+    const out = map.outPaths ? map.outPaths[i % map.outPaths.length] : p.slice().reverse();
+    const pts = p.concat(out.slice(1));
+    return { pts, cum: cumLens(pts), nestD: cumLens(p)[p.length - 1] };
+  });
+  S.totalWaves = S.endless ? 999999 : Math.min(30, 8 + Math.floor(S.L * 0.45));
+  S.waves = []; if (!S.endless) for (let w = 1; w <= S.totalWaves; w++) S.waves.push(genWave(S.L, w, S.totalWaves, S.nightmare));
+  S.meat = Math.round((180 + S.L * 16) * diffCur().meat);
+  S.eggsTotal = 5 + S.save.eggs; S.eggsNest = S.eggsTotal; S.eggsStolen = 0;
+  S.wave = 0; S.waveActive = false; S.started = false; S.betweenT = 0; S.spawnQ = []; S.spawnT = 0; S.spawnIdx = 0;
+  S.dragons = []; S.enemies = []; S.shots = []; S.parts = []; S.texts = []; S.dropped = []; S.effects = [];
+  S.spellCd = {}; for (const k in SPELLS) S.spellCd[k] = 0;
+  S.aiming = null; S.wrathT = 0; S.crippleT = 0; S.selPad = -1; S.selCard = null; S.selDragon = null;
+  S.kills = 0; S.time = 0; S.speed = 1; S.paused = false; S.over = false; S.won = false; S.flashRed = 0;
+  const fresh = Object.keys(ENEMIES).filter(k => ENEMIES[k].unlock === S.L && !S.endless);
+  const title = S.endless ? `${map.name}: endless` : `${map.name} ${levelIdx + 1}${S.save.diff !== 'normal' ? ` (${diffCur().name.toLowerCase()})` : ''}`;
+  S.banner = { t: 4, title, sub: fresh.length ? `New raider: ${ENEMIES[fresh[0]].name}. ${ENEMIES[fresh[0]].tip}` : (S.endless ? 'Hold out as long as you can.' : (variant ? variant.blurb + ' ' : '') + `${S.totalWaves} waves`) };
+  S.screen = 'game'; lastHud = {}; musicStart();
+  buildBackground(); renderPanel(); updateHud(); hideOverlay();
+}
+
+// ================= waves =================
+function genWave(L, w, nWaves, nightmare) {
+  const r = rng(L * 7919 + w * 104729 + (nightmare ? 17 : 0));
+  const p = nWaves > 1 ? Math.min(1, (w - 1) / (nWaves - 1)) : 1;
+  const maxCost = 1 + p * 4 + L * 0.08;
+  const avail = Object.keys(ENEMIES).filter(k => ENEMIES[k].unlock <= L && ENEMIES[k].cost <= maxCost);
+  let budget = Math.min(6 + w * 2.0 + L * 0.5, 7 + w * 4.5), guard = 0;
+  const picks = [];
+  while (budget > 0 && guard++ < 400) {
+    const ws = avail.map(k => { const d = ENEMIES[k]; return d.weight * (L - d.unlock < 3 ? 0.45 : 1) * (1 + p * (d.cost - 1) * 0.5); });
+    let x = r() * ws.reduce((a, b) => a + b, 0), k = avail[0];
+    for (let i = 0; i < avail.length; i++) { x -= ws[i]; if (x <= 0) { k = avail[i]; break; } }
+    picks.push(k); budget -= ENEMIES[k].cost;
+  }
+  picks.sort((a, b) => ENEMIES[a].cost - ENEMIES[b].cost);
+  const out = [], gapBase = Math.max(0.5, 1.0 - L * 0.01);
+  let i = 0, j = picks.length - 1, fromBack = false;
+  while (i <= j) { const k = fromBack ? picks[j--] : picks[i++]; fromBack = r() < 0.35; out.push({ type: k, elite: false, gap: gapBase * (ENEMIES[k].spd > 1.3 ? 0.7 : 1) }); }
+  if (w % 5 === 0) { const strong = avail.reduce((a, b) => ENEMIES[a].cost >= ENEMIES[b].cost ? a : b); for (let q = 0; q < Math.ceil(w / 5); q++) out.push({ type: strong, elite: true, gap: 1.3 }); }
+  return out;
+}
+// If 60%+ of your dragons share one colour (3+ dragons, level 5+), raiders bring more of the types that resist or ignore it.
+function dominantEl() {
+  const n = {}; let tot = 0; for (const d of S.dragons) { n[d.el] = (n[d.el] || 0) + 1; tot++; }
+  if (tot < 3) return null; let best = null; for (const k in n) if (!best || n[k] > n[best]) best = k;
+  return n[best] / tot >= 0.6 ? best : null;
+}
+function adaptWave(wave, w) {
+  const dom = S.L >= 5 ? dominantEl() : null; if (!dom) return wave;
+  const counters = Object.keys(ENEMIES).filter(k => { const d = ENEMIES[k]; return d.unlock <= S.L && ((d.immune && d.immune.includes(dom)) || d.resist === dom); });
+  if (!counters.length) return wave;
+  const r = rng(S.L * 131 + w * 71 + dom.charCodeAt(0)), share = Math.min(0.5, 0.25 + 0.005 * S.L);
+  return wave.map(u => { if (u.elite) return u; const p = share * (ENEMIES[u.type].weak === dom ? 1.6 : 1); if (r() >= p) return u; return Object.assign({}, u, { type: counters[Math.floor(r() * counters.length)], adapted: true }); });
+}
+function callWave(bonus) {
+  if (S.over || S.waveActive || S.wave >= S.totalWaves) return;
+  S.started = true;
+  if (bonus > 0) { S.meat += bonus; floatText(S.map.nest.x, S.map.nest.y - 1.4, 'Early +' + bonus, '#f5c542'); }
+  S.wave++;
+  if (S.endless && S.wave > S.waves.length) S.waves.push(genWave(S.L, S.wave, 20, S.nightmare));
+  S.spawnQ = adaptWave(S.waves[S.wave - 1], S.wave); S.spawnT = 0.4; S.waveActive = true; S.betweenT = 0;
+  if (S.spawnQ.some(u => u.adapted)) floatText(S.map.nest.x, S.map.nest.y - 2.2, 'The raiders adapt to your dragons!', '#ff9a5a');
+  SFX.tap(); lastHud.nb = undefined;
+}
+function spawnEnemy(type, idx, elite) {
+  const def = ENEMIES[type], route = S.routes[idx % S.routes.length];
+  const hpMult = (1 + 0.05 * (S.L - 1)) * (1 + 0.065 * (S.wave - 1)) * (S.map.diff || 1) * (1 + (S.map.ramp || 0) * S.levelIdx) * diffCur().hp * (elite ? 1.6 : 1) * (S.endless ? 1 + 0.02 * S.wave : 1);
+  const e = { type, def, route, d: 0, hp: def.hp * hpMult, maxhp: def.hp * hpMult, spd: def.spd * (1 + 0.004 * S.L) * diffCur().spd,
+    phase: 'in', carry: false, grabT: 0, slow: 0, slowT: 0, frozen: 0, burn: 0, burnT: 0, poison: 0, poisonT: 0,
+    invT: def.invis ? 2.5 + Math.random() : 0, invis: false, x: 0, y: 0, ang: 0, bob: Math.random() * TAU, elite: !!elite, scale: elite ? 1.3 : 1, hitT: 0, healFx: 0, id: S.nextId++ };
+  const p = posAlong(route.pts, route.cum, 0); e.x = p.x; e.y = p.y; e.ang = p.ang;
+  S.enemies.push(e);
+}
+
+// ================= dragons =================
+function padFree(i) { return !S.dragons.some(d => d.pad === i); }
+function placeDragon(padIdx, el) {
+  if (!padFree(padIdx)) return false;
+  const cost = DRAGONS[el].cost[0]; if (S.meat < cost) return false;
+  S.meat -= cost; const pad = S.map.pads[padIdx];
+  S.dragons.push({ el, stage: 0, x: pad.x, y: pad.y, pad: padIdx, ang: -Math.PI / 2, cool: 0.3, spent: cost, target: null, flap: 0, novaT: 0, id: S.nextId++ });
+  SFX.build(); SFX.roar(false); puff(pad.x, pad.y, EL[el].col, 14); return true;
+}
+function upgradeDragon(dr) {
+  if (dr.stage >= 2) return false;
+  const cost = DRAGONS[dr.el].cost[dr.stage + 1]; if (S.meat < cost) return false;
+  S.meat -= cost; dr.stage++; dr.spent += cost; SFX.build(); SFX.roar(dr.stage === 2); puff(dr.x, dr.y, EL[dr.el].col, 20); floatText(dr.x, dr.y - 0.8, STAGE[dr.stage] + '!', EL[dr.el].col); return true;
+}
+function sellDragon(dr) { const back = Math.floor(dr.spent * 0.6); S.meat += back; S.dragons = S.dragons.filter(d => d !== dr); floatText(dr.x, dr.y - 0.5, '+' + back, '#e0703a'); SFX.tap(); }
+function dragonStats(dr) {
+  const d = DRAGONS[dr.el], s = dr.stage, tier = S.save.tiers[dr.el] || 0, mult = 1 + 0.12 * tier;
+  return padBonus(S.map.pads[dr.pad], { dmg: d.dmg[s] * mult, rate: d.rate[s], range: d.range[s] + tier * 0.05, burn: (d.burn ? d.burn[s] : 0) * mult, splash: d.splash ? d.splash[s] : 0,
+    slow: d.slow ? Math.min(0.8, d.slow[s] + tier * 0.03) : 0, freeze: d.freeze ? d.freeze[s] : 0, nova: d.nova ? d.nova[s] : 0, dot: (d.dot ? d.dot[s] : 0) * mult, aura: d.aura ? d.aura[s] : 0, mult });
+}
+// Pad runes: 'range' pads (high ground) give +15% range, 'power' pads give +15% damage, burn and venom.
+const PAD_BONUS = 1.15;
+const padBonus = (pad, st) => { if (!pad || !pad.b) return st; if (pad.b === 'range') st.range *= PAD_BONUS; else { st.dmg *= PAD_BONUS; st.burn *= PAD_BONUS; st.dot *= PAD_BONUS; } return st; };
+const PAD_NOTE = { range: 'High ground: +15% range. ', power: 'Power rune: +15% damage. ' };
+const immuneTo = (e, k) => !!(e.def.immune && e.def.immune.includes(k));
+function updateDragon(dr, dt) {
+  const st = dragonStats(dr); dr.cool -= dt; if (dr.flap > 0) dr.flap -= dt;
+  if (st.aura > 0) for (const e of S.enemies) { if (e.hp > 0 && Math.hypot(e.x - dr.x, e.y - dr.y) < st.aura) damage(e, 6 * st.mult * dt, 'poison'); }
+  if (st.nova > 0) { dr.novaT += dt; if (dr.novaT >= st.nova) { dr.novaT = 0; let any = false; for (const e of S.enemies) { if (e.hp > 0 && !immuneTo(e, 'ice') && Math.hypot(e.x - dr.x, e.y - dr.y) < st.range) { e.frozen = Math.max(e.frozen, 1.5); e.freezeCd = 3.5; any = true; } } if (any) { S.effects.push({ kind: 'nova', x: dr.x, y: dr.y, r: st.range, t: 0.5, max: 0.5 }); SFX.ice(); } } }
+  let best = null, bestKey = -1;
+  for (const e of S.enemies) { if (e.hp <= 0 || e.invis || immuneTo(e, dr.el)) continue; if (Math.hypot(e.x - dr.x, e.y - dr.y) > st.range) continue; const key = (e.carry ? 1000 : 0) + e.d; if (key > bestKey) { bestKey = key; best = e; } }
+  dr.target = best;
+  // Dragons swing round on the pad like the original's turntables: a visible pivot before each volley, and a slow sweep when idle.
+  if (best) { const want = Math.atan2(best.y - dr.y, best.x - dr.x); dr.ang = turnTo(dr.ang, want, 4.4 * dt); if (dr.cool <= 0 && Math.abs(angDiff(dr.ang, want)) < 0.35) { dr.cool = 1 / st.rate; shoot(dr, best, st); } }
+  else dr.ang += Math.sin(S.time * 0.6 + dr.id) * 0.7 * dt;
+}
+function shoot(dr, e, st) {
+  const hd = [0.40, 0.52, 0.64][dr.stage] * 1.55;
+  S.shots.push({ el: dr.el, x: dr.x + Math.cos(dr.ang) * hd, y: dr.y + Math.sin(dr.ang) * hd, tx: e.x, ty: e.y, target: e, spd: 9, st, stage: dr.stage, ang: dr.ang, age: 0 });
+  dr.flap = 0.25; SFX[dr.el]();
+  const len = Math.min(st.range, Math.hypot(e.x - dr.x, e.y - dr.y));
+  S.effects.push({ kind: 'breath', x: dr.x + Math.cos(dr.ang) * hd, y: dr.y + Math.sin(dr.ang) * hd, ang: dr.ang, len, el: dr.el, stage: dr.stage, t: 0.34, max: 0.34 });
+}
+function updateShot(s, dt) {
+  const t = s.target; if (t && t.hp > 0 && !t.gone) { s.tx = t.x; s.ty = t.y; }
+  const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy), step = s.spd * dt; s.age += dt;
+  if (d <= step || d < 0.12) { hitShot(s); s.dead = true; return; }
+  s.x += dx / d * step; s.y += dy / d * step; s.ang = Math.atan2(dy, dx);
+  if (s.el === 'fire' && Math.random() < 0.6) S.parts.push({ x: s.x, y: s.y, vx: (Math.random() - 0.5) * 0.6, vy: -0.4 - Math.random() * 0.4, life: 0.3, max: 0.3, col: '#ffb347', r: 0.07 });
+}
+function hitShot(s) {
+  const st = s.st, t = s.target, alive = t && t.hp > 0 && !t.gone;
+  if (s.el === 'fire') {
+    if (alive) { damage(t, st.dmg, 'fire'); if (st.burn > 0 && !immuneTo(t, 'fire')) { t.burn = Math.max(t.burn, st.burn); t.burnT = 3; } }
+    if (st.splash > 0) { for (const e of S.enemies) { if (e === t || e.hp <= 0) continue; if (Math.hypot(e.x - s.tx, e.y - s.ty) < st.splash) { damage(e, st.dmg * 0.5, 'fire'); if (st.burn > 0 && !immuneTo(e, 'fire')) { e.burn = Math.max(e.burn, st.burn * 0.5); e.burnT = 2; } } } S.effects.push({ kind: 'boom', x: s.tx, y: s.ty, r: st.splash, t: 0.35, max: 0.35, col: '255,138,58' }); }
+    spark(s.tx, s.ty, '#ffb347', 6);
+  } else if (s.el === 'ice') {
+    if (alive) { damage(t, st.dmg, 'ice'); if (!immuneTo(t, 'ice')) { t.slow = Math.max(t.slow, st.slow * (t.def.slowRes || 1)); t.slowT = 2.2; if (st.freeze > 0 && t.frozen <= 0 && !(t.freezeCd > 0) && Math.random() < st.freeze) { t.frozen = 1.0; t.freezeCd = 3.5; } } }
+    spark(s.tx, s.ty, '#bfe9ff', 6);
+  } else {
+    if (alive) { damage(t, st.dmg, 'poison'); if (!immuneTo(t, 'poison')) { t.poison = Math.min(st.dot * 3, t.poison + st.dot); t.poisonT = 4; } }
+    spark(s.tx, s.ty, '#9cff5a', 6);
+  }
+}
+
+// ================= enemies =================
+function damage(e, amt, kind) {
+  if (e.hp <= 0 || amt <= 0) return;
+  if (immuneTo(e, kind === 'burn' ? 'fire' : kind)) return;
+  if (e.def.armor && kind !== 'poison') amt *= (1 - e.def.armor);
+  const el = kind === 'burn' ? 'fire' : kind;
+  if (e.def.weak === el) amt *= weakMult(S.L); else if (e.def.resist === el) amt *= resistMult(S.L);
+  if (S.wrathT > 0 && kind !== 'spell') amt *= (S.wrathM || 2);
+  e.hp -= amt; e.hitT = 0.12;
+  if (e.hp <= 0) killEnemy(e);
+}
+function killEnemy(e) {
+  e.hp = 0; e.dead = true; S.kills++;
+  const m = Math.round(e.def.meat * (e.elite ? 2 : 1) * (1 + 0.01 * S.L) * diffCur().meat); S.meat += m;
+  floatText(e.x, e.y - 0.6, '+' + m, '#e0703a'); puff(e.x, e.y, e.def.col, 10); SFX.die();
+  if (e.carry) { e.carry = false; S.dropped.push({ x: e.x, y: e.y, t: 0, returning: false, rt: 0, sx: 0, sy: 0, dead: false, id: S.nextId++ }); }
+}
+// Build a route from the raider's current spot back along the points it has already walked, so it leaves the way it came in.
+function retreatRoute(e) {
+  const r = e.route, pts = [{ x: e.x, y: e.y }];
+  for (let i = r.pts.length - 1; i >= 0; i--) if (r.cum[i] < e.d - 1e-6) pts.push(r.pts[i]);
+  return { pts, cum: cumLens(pts), nestD: 0 };
+}
+function updateEnemy(e, dt) {
+  if (e.hitT > 0) e.hitT -= dt; if (e.healFx > 0) e.healFx -= dt;
+  if (e.frozen > 0) e.frozen -= dt; if (e.freezeCd > 0) e.freezeCd -= dt;
+  if (e.burnT > 0) { e.burnT -= dt; damage(e, e.burn * dt, 'burn'); if (Math.random() < dt * 6) S.parts.push({ x: e.x + (Math.random() - 0.5) * 0.3, y: e.y - 0.2, vx: 0, vy: -0.8, life: 0.4, max: 0.4, col: '#ff8a3a', r: 0.08 }); }
+  if (e.poisonT > 0) { e.poisonT -= dt; damage(e, e.poison * dt, 'poison'); if (e.poisonT <= 0) e.poison = 0; if (Math.random() < dt * 5) S.parts.push({ x: e.x + (Math.random() - 0.5) * 0.3, y: e.y - 0.3, vx: 0, vy: -0.5, life: 0.5, max: 0.5, col: '#9cff5a', r: 0.06 }); }
+  if (e.slowT > 0) { e.slowT -= dt; if (e.slowT <= 0) e.slow = 0; }
+  if (e.hp <= 0) return;
+  if (e.def.heal && e.hp < e.maxhp) { e.hp = Math.min(e.maxhp, e.hp + e.maxhp * e.def.heal * dt); e.healFx = 0.2; }
+  if (e.def.invis) { e.invT -= dt; if (e.invT <= 0) { e.invis = !e.invis; e.invT = e.invis ? 1.8 : 3.2; } }
+  let spd = e.spd;
+  if (e.def.rage && e.hp < e.maxhp * 0.5) spd *= 1.5;
+  if (e.slow > 0) spd *= (1 - e.slow);
+  if (S.crippleT > 0) spd *= (S.crippleF || 0.5);
+  if (e.frozen > 0) spd = 0;
+  if (e.phase === 'grab') { e.grabT -= dt; if (e.grabT <= 0) e.phase = 'out'; return; }
+  e.d += spd * dt;
+  if (e.phase === 'in') {
+    if (e.d >= e.route.nestD) { e.d = e.route.nestD; if (S.eggsNest > 0 && !e.carry) { S.eggsNest--; e.carry = true; SFX.grab(); SFX.cheer(); floatText(e.x, e.y - 0.8, 'Egg taken! Huzzah!', '#ffd35a'); } e.phase = 'grab'; e.grabT = 0.6; }
+  } else if (e.d >= e.route.cum[e.route.cum.length - 1]) {
+    if (e.carry) { S.eggsStolen++; e.carry = false; S.flashRed = 0.6; SFX.lost(); floatText(e.x, e.y, 'Egg lost', '#ff5c5c'); }
+    e.gone = true;
+  }
+  if (!e.carry && e.phase !== 'grab') { for (const g of S.dropped) { if (!g.dead && !g.returning && Math.hypot(g.x - e.x, g.y - e.y) < 0.45) { g.dead = true; e.carry = true; SFX.grab(); floatText(e.x, e.y - 0.8, 'Egg grabbed!', '#ffd35a'); if (e.phase === 'in') { e.route = retreatRoute(e); e.d = 0; } e.phase = 'grab'; e.grabT = 0.4; break; } } }
+  const p = posAlong(e.route.pts, e.route.cum, e.d); e.x = p.x; e.y = p.y; e.ang = p.ang;
+  e.bob += dt * spd * 7;
+}
+
+// ================= eggs, spells, fx =================
+function startReturn(g) { if (g.dead || g.returning) return; g.returning = true; g.rt = 0; g.sx = g.x; g.sy = g.y; }
+function updateDropped(dt) {
+  const auto = S.save.auto, n = S.map.nest;
+  for (const g of S.dropped) {
+    if (g.dead) continue;
+    if (g.returning) { g.rt += dt / 1.25; if (g.rt >= 1) { g.dead = true; S.eggsNest++; SFX.back(); spark(n.x, n.y, '#fff3b0', 8); } }
+    else { g.t += dt; if (auto > 0 && g.t >= autoDelay(auto, S.L)) startReturn(g); }
+  }
+  S.dropped = S.dropped.filter(g => !g.dead);
+}
+function castSpell(id, at) {
+  if (!S.save.spells[id] || S.spellCd[id] > 0 || S.over) return;
+  const sp = SPELLS[id];
+  const cost = spellCost(id);
+  if (S.meat < cost) { floatText(S.map.nest.x, S.map.nest.y - 1.6, `Need ${cost} meat for ${sp.name}`, '#ff9a5a'); S.aiming = null; updateHud(); return; }
+  if (sp.aim && !at) { S.aiming = id; updateHud(); return; }
+  S.meat -= cost;
+  const t = spellTier(id) || 1;
+  S.spellCd[id] = spellCdFor(id, t); S.aiming = null; SFX.spell();
+  const fm = 1 + 0.12 * (S.save.tiers.fire || 0);
+  if (id === 'sp_firerain') { const r = SP.rainR(t); for (const e of S.enemies) if (e.hp > 0 && Math.hypot(e.x - at.x, e.y - at.y) < r) damage(e, SP.rainDmg(t) * fm, 'spell'); S.effects.push(rainFx(at.x, at.y, r, 1.0)); }
+  else if (id === 'sp_iceup') { for (const e of S.enemies) if (e.hp > 0 && !immuneTo(e, 'ice')) e.frozen = Math.max(e.frozen, SP.freeze(t)); S.effects.push({ kind: 'flash', col: '150,220,255', a: 0.5, t: 0.5, max: 0.5 }); }
+  else if (id === 'sp_cripple') { S.crippleT = SP.cripT(t); S.crippleF = SP.cripF(t); S.effects.push({ kind: 'flash', col: '120,255,80', a: 0.35, t: 0.5, max: 0.5 }); }
+  else if (id === 'sp_wrath') { S.wrathT = SP.wrathT(t); S.wrathM = SP.wrathM(t); S.effects.push({ kind: 'flash', col: '255,120,40', a: 0.4, t: 0.5, max: 0.5 }); }
+  else if (id === 'sp_meteor') { for (const e of S.enemies) if (e.hp > 0) { damage(e, SP.meteorDmg(t) * fm, 'spell'); S.effects.push(rainFx(e.x, e.y, 0.7, 0.8)); } }
+  else if (id === 'sp_restore') { let n = 0; for (const e of S.enemies) if (e.carry) { e.carry = false; n++; spark(e.x, e.y, '#fff3b0', 8); } for (const g of S.dropped) if (!g.dead) { g.dead = true; n++; } S.eggsNest += n; if (n) SFX.back(); S.effects.push({ kind: 'flash', col: '255,240,180', a: 0.45, t: 0.6, max: 0.6 }); }
+  updateHud();
+}
+function rainFx(x, y, r, dur) { const streaks = []; for (let i = 0; i < Math.ceil(r * 8); i++) streaks.push({ dx: (Math.random() - 0.5) * r * 1.8, dy: (Math.random() - 0.5) * r * 1.8, delay: Math.random() * dur * 0.5 }); return { kind: 'rain', x, y, r, t: dur, max: dur, streaks }; }
+function floatText(x, y, text, col) { S.texts.push({ x, y, text, col, t: 0 }); }
+function puff(x, y, col, n) { for (let i = 0; i < n; i++) { const a = Math.random() * TAU, sp = 0.6 + Math.random() * 1.6; S.parts.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.35 + Math.random() * 0.3, max: 0.6, col, r: 0.06 + Math.random() * 0.08 }); } }
+function spark(x, y, col, n) { for (let i = 0; i < n; i++) { const a = Math.random() * TAU, sp = 1 + Math.random() * 2; S.parts.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.2 + Math.random() * 0.2, max: 0.4, col, r: 0.05 }); } }
+function updateFx(dt) {
+  for (const p of S.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
+  S.parts = S.parts.filter(p => p.life > 0); if (S.parts.length > 260) S.parts.splice(0, S.parts.length - 260);
+  for (const f of S.effects) f.t -= dt; S.effects = S.effects.filter(f => f.t > 0);
+  for (const t of S.texts) t.t += dt; S.texts = S.texts.filter(t => t.t < 1);
+  if (S.flashRed > 0) S.flashRed -= dt;
+  if (S.banner) { S.banner.t -= dt; if (S.banner.t <= 0) S.banner = null; }
+}
+
+// ================= main update =================
+function update(dt) {
+  S.time += dt; if (S.wrathT > 0) S.wrathT -= dt; if (S.crippleT > 0) S.crippleT -= dt;
+  for (const k in S.spellCd) if (S.spellCd[k] > 0) S.spellCd[k] -= dt;
+  if (S.started) {
+    if (S.waveActive) {
+      if (S.spawnQ.length) { S.spawnT -= dt; if (S.spawnT <= 0) { const it = S.spawnQ.shift(); spawnEnemy(it.type, S.spawnIdx++, it.elite); S.spawnT = it.gap; } }
+      else if (S.enemies.length === 0) { S.waveActive = false; const bonus = Math.round((15 + S.wave * 2) * (1 + 0.006 * S.L) * diffCur().meat); S.meat += bonus; floatText(S.map.nest.x, S.map.nest.y - 1.4, 'Wave clear +' + bonus, '#f5c542'); if (S.wave < S.totalWaves) S.betweenT = 12; lastHud.nb = undefined; }
+    } else if (S.wave < S.totalWaves) { S.betweenT -= dt; if (S.betweenT <= 0) callWave(0); }
+  }
+  for (const dr of S.dragons) updateDragon(dr, dt);
+  for (const e of S.enemies) updateEnemy(e, dt);
+  S.enemies = S.enemies.filter(e => !e.dead && !e.gone);
+  for (const s of S.shots) updateShot(s, dt); S.shots = S.shots.filter(s => !s.dead);
+  updateDropped(dt); updateFx(dt);
+  if (!S.over) {
+    if (S.eggsStolen >= S.eggsTotal) endLevel(false);
+    else if (!S.endless && S.wave >= S.totalWaves && !S.waveActive && S.enemies.length === 0 && S.spawnQ.length === 0) endLevel(true);
+  }
+}
+function endLevel(won) {
+  S.over = true; S.won = won; S.aiming = null; S.selCard = null; S.selPad = -1; S.selDragon = null; musicStop();
+  const remaining = S.eggsTotal - S.eggsStolen;
+  let stars = 0, gold = 0, first = false;
+  if (S.endless) { gold = Math.floor(Math.max(0, S.wave - 1) * 8 * diffCur().gold); if (S.wave - 1 > (S.save.endless[S.mapIdx] || 0)) S.save.endless[S.mapIdx] = S.wave - 1; }
+  else if (won) {
+    stars = Math.min(diffCur().maxStars, remaining >= S.eggsTotal ? 3 : remaining >= Math.ceil(S.eggsTotal * 0.6) ? 2 : 1);
+    const prev = S.save.stars[S.mapIdx][S.levelIdx] || 0; first = prev === 0;
+    gold = 25 + S.L * 6 + remaining * 6 + (stars === 3 ? 30 : 0) + (first ? 40 + S.L * 4 : 0);
+    gold += Math.min(50, Math.floor(S.meat / 40)); gold = Math.floor(gold * diffCur().gold);
+    if (stars > prev) S.save.stars[S.mapIdx][S.levelIdx] = stars;
+    SFX.win();
+  } else gold = Math.floor(S.kills * 0.4);
+  S.save.gold += gold; S.goldLevel = gold; persist();
+  renderPanel(); showEndScreen(won, stars, gold, first);
+}
+
+// ================= background (pre-rendered per map/resize) =================
+function strokePath(c, p, w, col) { c.strokeStyle = col; c.lineWidth = w; c.beginPath(); c.moveTo(p[0].x * T, p[0].y * T); for (let i = 1; i < p.length; i++) c.lineTo(p[i].x * T, p[i].y * T); c.stroke(); }
+function drawPad(c, x, y, b) {
+  c.fillStyle = 'rgba(0,0,0,0.45)'; c.beginPath(); c.ellipse(x + T * 0.06, y + T * 0.1, T * 0.6, T * 0.52, 0, 0, TAU); c.fill();
+  const g = c.createRadialGradient(x - T * 0.15, y - T * 0.15, T * 0.05, x, y, T * 0.58); g.addColorStop(0, '#7d7466'); g.addColorStop(1, '#46403a');
+  c.fillStyle = g; c.beginPath(); c.arc(x, y, T * 0.55, 0, TAU); c.fill();
+  c.strokeStyle = '#2a2521'; c.lineWidth = Math.max(1, T * 0.05); c.stroke();
+  c.strokeStyle = 'rgba(255,230,180,0.28)'; c.lineWidth = Math.max(1, T * 0.04);
+  c.beginPath(); c.arc(x, y, T * 0.36, 0, TAU); c.stroke();
+  c.beginPath(); c.moveTo(x - T * 0.18, y); c.lineTo(x + T * 0.18, y); c.moveTo(x, y - T * 0.18); c.lineTo(x, y + T * 0.18); c.stroke();
+  if (b) { c.strokeStyle = b === 'range' ? 'rgba(127,208,255,0.85)' : 'rgba(255,138,58,0.85)'; c.lineWidth = Math.max(1.5, T * 0.07); c.setLineDash([T * 0.14, T * 0.11]); c.beginPath(); c.arc(x, y, T * 0.46, 0, TAU); c.stroke(); c.setLineDash([]); }
+}
+function drawDoor(c, p0, p1) {
+  const ang = Math.atan2(p1.y - p0.y, p1.x - p0.x), cx = p0.x + Math.cos(ang) * 1.15, cy = p0.y + Math.sin(ang) * 1.15;
+  c.save(); c.translate(cx * T, cy * T); c.rotate(ang);
+  c.fillStyle = '#3a332e'; c.fillRect(-T * 0.5, -T * 0.9, T, T * 1.8);
+  c.fillStyle = '#070503'; c.fillRect(-T * 0.32, -T * 0.68, T * 0.64, T * 1.36);
+  c.strokeStyle = '#6a6058'; c.lineWidth = Math.max(1, T * 0.06);
+  for (let i = -2; i <= 2; i++) { c.beginPath(); c.moveTo(-T * 0.32, i * T * 0.3); c.lineTo(T * 0.32, i * T * 0.3); c.stroke(); }
+  c.beginPath(); c.moveTo(0, -T * 0.68); c.lineTo(0, T * 0.68); c.stroke();
+  c.strokeStyle = '#8a7a68'; c.lineWidth = Math.max(1, T * 0.08); c.strokeRect(-T * 0.5, -T * 0.9, T, T * 1.8);
+  c.restore();
+}
+function drawProp(c, pr) {
+  const x = pr.x * T, y = pr.y * T;
+  if (pr.k === 'skull') {
+    c.fillStyle = '#d9cfb4'; c.beginPath(); c.arc(x, y, T * 0.22, 0, TAU); c.fill(); c.fillRect(x - T * 0.14, y + T * 0.1, T * 0.28, T * 0.14);
+    c.fillStyle = '#1a1411'; c.beginPath(); c.arc(x - T * 0.08, y - T * 0.02, T * 0.06, 0, TAU); c.arc(x + T * 0.08, y - T * 0.02, T * 0.06, 0, TAU); c.fill();
+    c.fillRect(x - T * 0.1, y + T * 0.13, T * 0.03, T * 0.08); c.fillRect(x - T * 0.02, y + T * 0.13, T * 0.03, T * 0.08); c.fillRect(x + T * 0.06, y + T * 0.13, T * 0.03, T * 0.08);
+  } else {
+    c.strokeStyle = '#d9cfb4'; c.lineWidth = Math.max(1.5, T * 0.09); c.lineCap = 'round';
+    c.beginPath(); c.moveTo(x - T * 0.3, y - T * 0.2); c.lineTo(x + T * 0.3, y + T * 0.2); c.moveTo(x - T * 0.3, y + T * 0.2); c.lineTo(x + T * 0.3, y - T * 0.2); c.stroke();
+    c.fillStyle = '#d9cfb4'; for (const [dx, dy] of [[-0.3, -0.2], [0.3, 0.2], [-0.3, 0.2], [0.3, -0.2]]) { c.beginPath(); c.arc(x + dx * T, y + dy * T, T * 0.07, 0, TAU); c.fill(); }
+  }
+}
+function buildBackground() {
+  if (!S.map) return;
+  BG = document.createElement('canvas'); BG.width = Math.max(1, Math.round(CW * DPR)); BG.height = Math.max(1, Math.round(CH * DPR));
+  const c = BG.getContext('2d'); c.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const map = S.map, r = rng(map.seed);
+  c.fillStyle = map.rock; c.fillRect(0, 0, CW, CH);
+  for (let i = 0; i < 380; i++) { const x = r() * CW, y = r() * CH, rr = T * (0.25 + r() * 0.7); c.fillStyle = `rgba(${60 + r() * 30 | 0},${45 + r() * 25 | 0},${35 + r() * 20 | 0},${0.3 + r() * 0.3})`; c.beginPath(); c.ellipse(x, y, rr, rr * (0.55 + r() * 0.5), r() * TAU, 0, TAU); c.fill(); }
+  c.strokeStyle = 'rgba(0,0,0,0.35)'; c.lineWidth = 1;
+  for (let i = 0; i < 90; i++) { let x = r() * CW, y = r() * CH; c.beginPath(); c.moveTo(x, y); for (let k = 0; k < 4; k++) { x += (r() - 0.5) * T * 1.3; y += (r() - 0.5) * T * 1.3; c.lineTo(x, y); } c.stroke(); }
+  const all = map.paths.concat(map.outPaths || []);
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  for (const p of all) strokePath(c, p, T * 1.62, '#15100d');
+  for (const p of all) strokePath(c, p, T * 1.22, '#5a4633');
+  const n = map.nest;
+  c.fillStyle = '#15100d'; c.beginPath(); c.arc(n.x * T, n.y * T, T * 1.58, 0, TAU); c.fill();
+  c.fillStyle = '#5a4633'; c.beginPath(); c.arc(n.x * T, n.y * T, T * 1.32, 0, TAU); c.fill();
+  const cobbles = ['#4e3c2c', '#66513c', '#3f3024', '#5c4835'];
+  for (const p of all) { const cum = cumLens(p), len = cum[cum.length - 1]; for (let d = 0; d < len; d += 0.3) { const q = posAlong(p, cum, d); const nx = -Math.sin(q.ang), ny = Math.cos(q.ang), off = (r() - 0.5) * 0.9, rr = T * (0.09 + r() * 0.1); c.fillStyle = cobbles[r() * 4 | 0]; c.beginPath(); c.ellipse((q.x + nx * off) * T, (q.y + ny * off) * T, rr * 1.4, rr, q.ang + (r() - 0.5), 0, TAU); c.fill(); } }
+  for (let i = 0; i < 60; i++) { const a = r() * TAU, rad = T * (0.5 + r() * 0.8); c.fillStyle = cobbles[r() * 4 | 0]; c.beginPath(); c.ellipse(n.x * T + Math.cos(a) * rad, n.y * T + Math.sin(a) * rad, T * 0.14, T * 0.09, a, 0, TAU); c.fill(); }
+  const straw = ['#c9a24a', '#a8823a', '#e0bb5c', '#8a6a2a'];
+  for (let i = 0; i < 110; i++) { const a = r() * TAU, rad = T * (0.72 + r() * 0.5); const x = n.x * T + Math.cos(a) * rad, y = n.y * T + Math.sin(a) * rad; c.strokeStyle = straw[r() * 4 | 0]; c.lineWidth = Math.max(1, T * 0.05); c.beginPath(); c.moveTo(x, y); c.lineTo(x + Math.cos(a + 1.2 + r()) * T * 0.4, y + Math.sin(a + 1.2 + r()) * T * 0.4); c.stroke(); }
+  c.fillStyle = '#3a2a18'; c.beginPath(); c.arc(n.x * T, n.y * T, T * 0.7, 0, TAU); c.fill();
+  for (const pd of map.pads) drawPad(c, pd.x * T, pd.y * T, pd.b);
+  for (const p of map.paths) drawDoor(c, p[0], p[1]);
+  if (map.outPaths) for (const p of map.outPaths) drawDoor(c, p[p.length - 1], p[p.length - 2]);
+  for (const pr of (map.props || [])) drawProp(c, pr);
+  for (const t of map.torches) { c.fillStyle = '#3a2a1e'; c.fillRect(t.x * T - T * 0.08, t.y * T - T * 0.05, T * 0.16, T * 0.32); c.fillStyle = '#5a4a3a'; c.fillRect(t.x * T - T * 0.14, t.y * T + T * 0.2, T * 0.28, T * 0.08); }
+  const g = c.createRadialGradient(CW / 2, CH / 2, CH * 0.3, CW / 2, CH / 2, CH * 0.8); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.5)'); c.fillStyle = g; c.fillRect(0, 0, CW, CH);
+}
+
+// ================= sprites =================
+function drawEgg(c, x, y, r, tilt) {
+  c.save(); c.translate(x, y); c.rotate(tilt || 0);
+  const g = c.createRadialGradient(-r * 0.3, -r * 0.4, r * 0.1, 0, 0, r * 1.3); g.addColorStop(0, '#fff9e8'); g.addColorStop(1, '#d4bd8c');
+  c.fillStyle = g; c.beginPath(); c.ellipse(0, 0, r * 0.78, r, 0, 0, TAU); c.fill();
+  c.strokeStyle = 'rgba(80,60,30,0.35)'; c.lineWidth = Math.max(1, r * 0.08); c.stroke();
+  c.fillStyle = 'rgba(120,90,50,0.35)';
+  for (const [dx, dy] of [[-0.3, -0.2], [0.25, 0.1], [-0.1, 0.5], [0.35, -0.5]]) { c.beginPath(); c.arc(dx * r, dy * r, r * 0.1, 0, TAU); c.fill(); }
+  c.restore();
+}
+// Dragon drawn at the origin, facing -y. sz is the body radius in pixels.
+function drawDragonSprite(c, sz, el, stage, flap, t, id) {
+  const col = DCOL[el];
+  c.fillStyle = 'rgba(0,0,0,0.35)'; c.beginPath(); c.ellipse(sz * 0.08, sz * 0.2, sz * 1.15, sz * 1.0, 0, 0, TAU); c.fill();
+  const wag = Math.sin(t * 3 + id) * sz * 0.3;
+  c.strokeStyle = col.body; c.lineWidth = sz * 0.36; c.lineCap = 'round';
+  c.beginPath(); c.moveTo(0, sz * 0.6); c.quadraticCurveTo(wag, sz * 1.5, -wag * 0.5, sz * 2.05); c.stroke();
+  c.fillStyle = col.dark; c.beginPath(); c.moveTo(-wag * 0.5 - sz * 0.28, sz * 2.0); c.lineTo(-wag * 0.5, sz * 2.45); c.lineTo(-wag * 0.5 + sz * 0.28, sz * 2.0); c.closePath(); c.fill();
+  const f = flap > 0 ? 1 + flap * 1.4 : 1 + Math.sin(t * 2 + id) * 0.07;
+  for (const sg of [-1, 1]) {
+    c.fillStyle = col.wing; c.beginPath(); c.moveTo(sg * sz * 0.3, -sz * 0.1);
+    c.quadraticCurveTo(sg * sz * 1.4 * f, -sz * 0.95 * f, sg * sz * 1.75 * f, sz * 0.25);
+    c.quadraticCurveTo(sg * sz * 1.25 * f, sz * 0.45, sg * sz * 1.05 * f, sz * 0.95);
+    c.quadraticCurveTo(sg * sz * 0.6, sz * 0.5, sg * sz * 0.3, sz * 0.6); c.closePath(); c.fill();
+    c.strokeStyle = col.dark; c.lineWidth = Math.max(1, sz * 0.07); c.beginPath(); c.moveTo(sg * sz * 0.3, -sz * 0.1); c.lineTo(sg * sz * 1.75 * f, sz * 0.25); c.moveTo(sg * sz * 0.3, sz * 0.1); c.lineTo(sg * sz * 1.05 * f, sz * 0.95); c.stroke();
+  }
+  c.fillStyle = col.body; c.beginPath(); c.ellipse(0, sz * 0.15, sz * 0.78, sz * 0.98, 0, 0, TAU); c.fill();
+  c.fillStyle = col.belly; c.beginPath(); c.ellipse(0, sz * 0.28, sz * 0.36, sz * 0.66, 0, 0, TAU); c.fill();
+  c.fillStyle = col.dark;
+  for (let i = 0; i < stage + 2; i++) { const yy = -sz * 0.3 + i * sz * 0.36; c.beginPath(); c.moveTo(-sz * 0.13, yy); c.lineTo(0, yy - sz * 0.27); c.lineTo(sz * 0.13, yy); c.closePath(); c.fill(); }
+  c.fillStyle = col.body; c.beginPath(); c.ellipse(0, -sz * 0.95, sz * 0.52, sz * 0.56, 0, 0, TAU); c.fill();
+  c.beginPath(); c.ellipse(0, -sz * 1.36, sz * 0.34, sz * 0.32, 0, 0, TAU); c.fill();
+  c.fillStyle = col.dark; c.beginPath(); c.arc(-sz * 0.12, -sz * 1.52, sz * 0.05, 0, TAU); c.arc(sz * 0.12, -sz * 1.52, sz * 0.05, 0, TAU); c.fill();
+  c.fillStyle = '#e8dcc4';
+  for (const sg of [-1, 1]) { c.beginPath(); c.moveTo(sg * sz * 0.3, -sz * 1.05); c.quadraticCurveTo(sg * sz * 0.65, -sz * 1.2, sg * sz * 0.6, -sz * (1.6 + stage * 0.12)); c.quadraticCurveTo(sg * sz * 0.45, -sz * 1.2, sg * sz * 0.15, -sz * 1.15); c.closePath(); c.fill(); }
+  c.fillStyle = '#ffe066'; c.beginPath(); c.arc(-sz * 0.2, -sz * 1.05, sz * 0.11, 0, TAU); c.arc(sz * 0.2, -sz * 1.05, sz * 0.11, 0, TAU); c.fill();
+  c.fillStyle = '#100808'; c.beginPath(); c.arc(-sz * 0.2, -sz * 1.09, sz * 0.05, 0, TAU); c.arc(sz * 0.2, -sz * 1.09, sz * 0.05, 0, TAU); c.fill();
+  if (flap > 0) { c.globalAlpha = Math.min(1, flap * 3); c.fillStyle = col.glow; c.beginPath(); c.arc(0, -sz * 1.62, sz * 0.3, 0, TAU); c.fill(); c.globalAlpha = 1; }
+}
+function drawDragon(dr) {
+  const sz = [0.40, 0.52, 0.64][dr.stage] * T;
+  ctx.save(); ctx.translate(dr.x * T, dr.y * T);
+  if (S.wrathT > 0) { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgba(255,60,30,0.16)'; ctx.beginPath(); ctx.arc(0, 0, sz * 1.6, 0, TAU); ctx.fill(); ctx.globalCompositeOperation = 'source-over'; }
+  ctx.rotate(dr.ang + Math.PI / 2);
+  drawDragonSprite(ctx, sz, dr.el, dr.stage, dr.flap, S.time, dr.id);
+  ctx.restore();
+}
+function roundRect(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.lineTo(x + w - r, y); c.quadraticCurveTo(x + w, y, x + w, y + r); c.lineTo(x + w, y + h - r); c.quadraticCurveTo(x + w, y + h, x + w - r, y + h); c.lineTo(x + r, y + h); c.quadraticCurveTo(x, y + h, x, y + h - r); c.lineTo(x, y + r); c.quadraticCurveTo(x, y, x + r, y); c.closePath(); }
+function drawHat(c, t, u) {
+  c.lineWidth = Math.max(1, u * 0.08);
+  if (t === 'peasant') { c.fillStyle = '#d8b25a'; c.beginPath(); c.ellipse(0, -u * 1.05, u * 0.85, u * 0.24, 0, 0, TAU); c.fill(); c.beginPath(); c.arc(0, -u * 1.1, u * 0.42, Math.PI, 0); c.fill(); }
+  else if (t === 'thief') { c.fillStyle = '#2a2a3a'; c.beginPath(); c.arc(0, -u * 0.8, u * 0.58, 0, TAU); c.fill(); c.fillStyle = '#f1c9a0'; c.beginPath(); c.ellipse(u * 0.2, -u * 0.72, u * 0.3, u * 0.22, 0, 0, TAU); c.fill(); c.fillStyle = '#1a1010'; c.beginPath(); c.arc(u * 0.3, -u * 0.74, u * 0.06, 0, TAU); c.fill(); }
+  else if (t === 'knight') { c.fillStyle = '#b8c0c8'; c.beginPath(); c.arc(0, -u * 0.82, u * 0.58, 0, TAU); c.fill(); c.fillStyle = '#2a2a30'; c.fillRect(-u * 0.05, -u * 0.92, u * 0.62, u * 0.16); c.fillStyle = '#d03a2a'; c.beginPath(); c.ellipse(-u * 0.15, -u * 1.4, u * 0.15, u * 0.32, 0.5, 0, TAU); c.fill(); }
+  else if (t === 'mage') { c.fillStyle = '#5a35a0'; c.beginPath(); c.moveTo(-u * 0.75, -u * 1.05); c.lineTo(u * 0.75, -u * 1.05); c.lineTo(u * 0.05, -u * 2.15); c.closePath(); c.fill(); c.fillStyle = '#ffd35a'; c.beginPath(); c.arc(u * 0.05, -u * 1.45, u * 0.1, 0, TAU); c.fill(); }
+  else if (t === 'priest') { c.fillStyle = '#f4efe2'; c.beginPath(); c.moveTo(-u * 0.5, -u * 1.0); c.quadraticCurveTo(0, -u * 2.1, u * 0.5, -u * 1.0); c.closePath(); c.fill(); c.strokeStyle = '#d9a93a'; c.beginPath(); c.moveTo(0, -u * 1.75); c.lineTo(0, -u * 1.2); c.moveTo(-u * 0.16, -u * 1.52); c.lineTo(u * 0.16, -u * 1.52); c.stroke(); }
+  else if (t === 'ranger') { c.fillStyle = '#3d7a30'; c.beginPath(); c.arc(0, -u * 0.85, u * 0.6, Math.PI * 0.95, Math.PI * 2.05); c.closePath(); c.fill(); c.fillStyle = '#e8dcc4'; c.beginPath(); c.moveTo(-u * 0.3, -u * 1.3); c.lineTo(-u * 0.95, -u * 1.75); c.lineTo(-u * 0.5, -u * 1.2); c.closePath(); c.fill(); }
+  else if (t === 'barbarian') { c.fillStyle = '#7a5a3a'; c.beginPath(); c.arc(0, -u * 0.9, u * 0.56, Math.PI, 0); c.fill(); c.fillStyle = '#e8dcc4'; for (const sg of [-1, 1]) { c.beginPath(); c.moveTo(sg * u * 0.45, -u * 1.0); c.quadraticCurveTo(sg * u * 0.95, -u * 1.3, sg * u * 0.7, -u * 1.85); c.quadraticCurveTo(sg * u * 0.7, -u * 1.2, sg * u * 0.25, -u * 1.15); c.closePath(); c.fill(); } c.fillStyle = '#b5451b'; c.beginPath(); c.ellipse(u * 0.1, -u * 0.42, u * 0.46, u * 0.22, 0, 0, TAU); c.fill(); }
+  else if (t === 'druid') { c.fillStyle = '#5c4a26'; c.beginPath(); c.arc(0, -u * 0.85, u * 0.62, Math.PI * 0.9, Math.PI * 2.1); c.closePath(); c.fill(); c.strokeStyle = '#8ef04a'; c.lineWidth = Math.max(1, u * 0.1); for (const sg of [-1, 1]) { c.beginPath(); c.moveTo(sg * u * 0.3, -u * 1.35); c.lineTo(sg * u * 0.6, -u * 1.95); c.moveTo(sg * u * 0.45, -u * 1.65); c.lineTo(sg * u * 0.78, -u * 1.78); c.stroke(); } }
+}
+function drawGear(c, t, u) {
+  c.lineCap = 'round';
+  if (t === 'peasant') { c.strokeStyle = '#8a6a3a'; c.lineWidth = u * 0.12; c.beginPath(); c.moveTo(u * 0.7, u * 0.6); c.lineTo(u * 0.7, -u * 1.2); c.stroke(); c.strokeStyle = '#b8b8b8'; c.beginPath(); for (const dx of [-0.18, 0, 0.18]) { c.moveTo(u * (0.7 + dx), -u * 1.2); c.lineTo(u * (0.7 + dx), -u * 1.56); } c.moveTo(u * 0.52, -u * 1.2); c.lineTo(u * 0.88, -u * 1.2); c.stroke(); }
+  else if (t === 'thief') { c.strokeStyle = '#cfd6dd'; c.lineWidth = u * 0.14; c.beginPath(); c.moveTo(u * 0.7, u * 0.1); c.lineTo(u * 1.08, -u * 0.38); c.stroke(); }
+  else if (t === 'knight') { c.fillStyle = '#8a2a2a'; c.beginPath(); c.moveTo(-u * 1.08, -u * 0.5); c.lineTo(-u * 0.55, -u * 0.5); c.lineTo(-u * 0.55, u * 0.3); c.lineTo(-u * 0.82, u * 0.62); c.lineTo(-u * 1.08, u * 0.3); c.closePath(); c.fill(); c.strokeStyle = '#e8e8e8'; c.lineWidth = u * 0.14; c.beginPath(); c.moveTo(u * 0.7, u * 0.3); c.lineTo(u * 0.7, -u * 1.25); c.stroke(); c.strokeStyle = '#8a6a3a'; c.beginPath(); c.moveTo(u * 0.5, u * 0.05); c.lineTo(u * 0.9, u * 0.05); c.stroke(); }
+  else if (t === 'mage') { c.strokeStyle = '#8a6a3a'; c.lineWidth = u * 0.12; c.beginPath(); c.moveTo(u * 0.75, u * 0.7); c.lineTo(u * 0.75, -u * 1.2); c.stroke(); c.fillStyle = '#ff5cf0'; c.beginPath(); c.arc(u * 0.75, -u * 1.32, u * 0.18, 0, TAU); c.fill(); }
+  else if (t === 'priest') { c.strokeStyle = '#d9a93a'; c.lineWidth = u * 0.12; c.beginPath(); c.moveTo(u * 0.75, u * 0.7); c.lineTo(u * 0.75, -u * 1.1); c.moveTo(u * 0.55, -u * 1.0); c.lineTo(u * 0.95, -u * 1.0); c.stroke(); c.fillStyle = '#d9a93a'; c.fillRect(-u * 0.08, -u * 0.2, u * 0.16, u * 0.5); c.fillRect(-u * 0.22, -u * 0.05, u * 0.44, u * 0.14); }
+  else if (t === 'ranger') { c.strokeStyle = '#8a6a3a'; c.lineWidth = u * 0.1; c.beginPath(); c.arc(u * 0.8, -u * 0.2, u * 0.7, -Math.PI * 0.55, Math.PI * 0.55); c.stroke(); c.strokeStyle = '#e8dcc4'; c.lineWidth = Math.max(1, u * 0.04); const a = Math.PI * 0.55; c.beginPath(); c.moveTo(u * 0.8 + Math.cos(-a) * u * 0.7, -u * 0.2 + Math.sin(-a) * u * 0.7); c.lineTo(u * 0.8 + Math.cos(a) * u * 0.7, -u * 0.2 + Math.sin(a) * u * 0.7); c.stroke(); }
+  else if (t === 'barbarian') { c.strokeStyle = '#5a3a1a'; c.lineWidth = u * 0.14; c.beginPath(); c.moveTo(u * 0.8, u * 0.7); c.lineTo(u * 0.8, -u * 1.3); c.stroke(); c.fillStyle = '#c0c8d0'; c.beginPath(); c.moveTo(u * 0.8, -u * 1.55); c.quadraticCurveTo(u * 1.55, -u * 1.3, u * 0.8, -u * 0.7); c.closePath(); c.fill(); }
+  else if (t === 'druid') { c.strokeStyle = '#4a3a1a'; c.lineWidth = u * 0.13; c.beginPath(); c.moveTo(u * 0.75, u * 0.7); c.quadraticCurveTo(u * 0.98, -u * 0.3, u * 0.7, -u * 1.2); c.stroke(); c.fillStyle = '#8ef04a'; c.beginPath(); c.arc(u * 0.7, -u * 1.36, u * 0.2, 0, TAU); c.fill(); }
+}
+function drawEnemy(e) {
+  const x = e.x * T, y = e.y * T, u = T * 0.3 * e.scale, bob = Math.sin(e.bob) * u * 0.12;
+  ctx.save(); ctx.translate(x, y);
+  ctx.globalAlpha = e.invis ? 0.13 : 1;
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(0, u * 0.95, u * 0.85, u * 0.35, 0, 0, TAU); ctx.fill();
+  const face = Math.cos(e.ang) < 0 ? -1 : 1; ctx.scale(face, 1); ctx.translate(0, bob);
+  const lg = e.frozen > 0 ? 0 : Math.sin(e.bob) * u * 0.35;
+  ctx.strokeStyle = '#3a2a1e'; ctx.lineWidth = u * 0.28; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-u * 0.3, u * 0.3); ctx.lineTo(-u * 0.3 + lg, u * 0.92); ctx.moveTo(u * 0.3, u * 0.3); ctx.lineTo(u * 0.3 - lg, u * 0.92); ctx.stroke();
+  ctx.fillStyle = e.hitT > 0 ? '#ffffff' : e.def.col; roundRect(ctx, -u * 0.62, -u * 0.35, u * 1.24, u * 1.02, u * 0.3); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(-u * 0.62, u * 0.3, u * 1.24, u * 0.16);
+  drawGear(ctx, e.type, u);
+  ctx.fillStyle = e.hitT > 0 ? '#fff' : '#f1c9a0'; ctx.beginPath(); ctx.arc(0, -u * 0.8, u * 0.5, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#1a1010'; ctx.beginPath(); ctx.arc(u * 0.18, -u * 0.85, u * 0.07, 0, TAU); ctx.arc(u * 0.38, -u * 0.85, u * 0.07, 0, TAU); ctx.fill();
+  drawHat(ctx, e.type, u);
+  if (e.elite) { ctx.fillStyle = '#f5c542'; ctx.beginPath(); ctx.moveTo(-u * 0.4, -u * 2.0); ctx.lineTo(-u * 0.4, -u * 2.4); ctx.lineTo(-u * 0.15, -u * 2.15); ctx.lineTo(0, -u * 2.5); ctx.lineTo(u * 0.15, -u * 2.15); ctx.lineTo(u * 0.4, -u * 2.4); ctx.lineTo(u * 0.4, -u * 2.0); ctx.closePath(); ctx.fill(); }
+  if (e.frozen > 0) { ctx.globalAlpha = 0.6; ctx.fillStyle = '#bfe9ff'; roundRect(ctx, -u * 0.9, -u * 1.7, u * 1.8, u * 2.7, u * 0.3); ctx.fill(); ctx.globalAlpha = 0.9; ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(1, u * 0.08); ctx.beginPath(); ctx.moveTo(-u * 0.6, -u * 1.2); ctx.lineTo(-u * 0.2, -u * 1.5); ctx.stroke(); }
+  if (e.healFx > 0 && e.def.heal) { ctx.globalAlpha = 0.8; ctx.fillStyle = '#7fffa0'; ctx.font = `bold ${Math.max(8, u * 0.9)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('+', u * 1.0, -u * 1.4); }
+  ctx.restore();
+  if (e.hp < e.maxhp && !e.invis) { const w = T * 0.7 * e.scale, hy = y - u * 2.2 - (e.elite ? u * 0.5 : 0); ctx.fillStyle = '#100a08'; ctx.fillRect(x - w / 2 - 1, hy - 1, w + 2, 5); ctx.fillStyle = e.hp / e.maxhp > 0.4 ? '#5fd35f' : '#e04a3a'; ctx.fillRect(x - w / 2, hy, w * e.hp / e.maxhp, 3); }
+  if (e.carry && !e.invis) drawEgg(ctx, x, y - u * 2.45 + bob, T * 0.24, Math.sin(e.bob) * 0.15);
+}
+function drawShot(s) {
+  const x = s.x * T, y = s.y * T, big = 1 + s.stage * 0.3;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(s.ang);
+  if (s.el === 'fire') { ctx.globalCompositeOperation = 'lighter'; const g = ctx.createRadialGradient(0, 0, 0, 0, 0, T * 0.28 * big); g.addColorStop(0, 'rgba(255,240,150,1)'); g.addColorStop(0.4, 'rgba(255,140,40,0.9)'); g.addColorStop(1, 'rgba(255,60,10,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(-T * 0.08 * big, 0, T * 0.36 * big, T * 0.22 * big, 0, 0, TAU); ctx.fill(); }
+  else if (s.el === 'ice') { ctx.fillStyle = '#e8f8ff'; ctx.beginPath(); ctx.moveTo(T * 0.25 * big, 0); ctx.lineTo(0, T * 0.09 * big); ctx.lineTo(-T * 0.25 * big, 0); ctx.lineTo(0, -T * 0.09 * big); ctx.closePath(); ctx.fill(); ctx.strokeStyle = '#7fd0ff'; ctx.lineWidth = 1.5; ctx.stroke(); }
+  else { ctx.fillStyle = '#7ddc3a'; ctx.beginPath(); ctx.ellipse(0, 0, T * 0.18 * big, T * 0.13 * big, 0, 0, TAU); ctx.fill(); ctx.fillStyle = '#2f7a1a'; ctx.beginPath(); ctx.arc(-T * 0.04, 0, T * 0.07 * big, 0, TAU); ctx.fill(); }
+  ctx.restore();
+}
+
+// ================= frame =================
+function drawTorches() {
+  for (const t of S.map.torches) {
+    const x = t.x * T, y = t.y * T, fl = 0.85 + Math.sin(S.time * 13 + t.x * 7) * 0.1 + Math.sin(S.time * 29 + t.y * 3) * 0.05;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(x, y - T * 0.1, 0, x, y - T * 0.1, T * 2.3 * fl); g.addColorStop(0, 'rgba(255,150,60,0.24)'); g.addColorStop(1, 'rgba(255,120,40,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y - T * 0.1, T * 2.3 * fl, 0, TAU); ctx.fill(); ctx.restore();
+    ctx.fillStyle = '#ff9a2b'; ctx.beginPath(); ctx.ellipse(x, y - T * 0.28, T * 0.17 * fl, T * 0.38 * fl, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ffe27a'; ctx.beginPath(); ctx.ellipse(x, y - T * 0.2, T * 0.09, T * 0.2 * fl, 0, 0, TAU); ctx.fill();
+  }
+}
+function drawNestEggs() {
+  const n = S.map.nest;
+  let threat = 99; for (const e of S.enemies) if (e.hp > 0 && e.phase === 'in' && !e.carry) threat = Math.min(threat, Math.hypot(e.x - n.x, e.y - n.y));
+  const wob = threat < 3.2 ? (3.2 - threat) / 3.2 * 0.38 : 0; // eggs shiver as a raider closes in on the nest
+  for (let i = 0; i < S.eggsNest && i < NEST_OFFS.length; i++) { const o = NEST_OFFS[i]; drawEgg(ctx, (n.x + o[0]) * T, (n.y + o[1]) * T, T * 0.3, o[0] * 0.5 + (wob ? Math.sin(S.time * 19 + i * 1.7) * wob : 0)); }
+}
+function drawDropped() {
+  const n = S.map.nest;
+  for (const g of S.dropped) {
+    if (g.dead) continue;
+    if (g.returning) { const t = g.rt, x = lerp(g.sx, n.x, t), y = lerp(g.sy, n.y, t) - Math.sin(t * Math.PI) * 1.4; drawEgg(ctx, x * T, y * T, T * 0.28, t * 6); }
+    else { const pulse = 0.5 + Math.sin(S.time * 5) * 0.5; ctx.strokeStyle = `rgba(255,220,120,${0.3 + pulse * 0.5})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(g.x * T, g.y * T, T * (0.45 + pulse * 0.12), 0, TAU); ctx.stroke(); drawEgg(ctx, g.x * T, g.y * T, T * 0.28, 0.9); }
+  }
+}
+function drawRangeRing(x, y, r, col) { ctx.fillStyle = `rgba(${col},0.1)`; ctx.strokeStyle = `rgba(${col},0.55)`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x * T, y * T, r * T, 0, TAU); ctx.fill(); ctx.stroke(); }
+const RGB = { fire: '255,138,58', ice: '160,220,255', poison: '150,255,90' };
+function drawUnder() {
+  for (const dr of S.dragons) { const st = dragonStats(dr); if (st.aura > 0) { const p = 0.85 + Math.sin(S.time * 4 + dr.id) * 0.15; ctx.fillStyle = 'rgba(120,255,60,0.16)'; ctx.beginPath(); ctx.arc(dr.x * T, dr.y * T, st.aura * T * p, 0, TAU); ctx.fill(); } }
+  if (S.selDragon) { const st = dragonStats(S.selDragon); drawRangeRing(S.selDragon.x, S.selDragon.y, st.range, RGB[S.selDragon.el]); }
+  if (S.selPad >= 0 && S.selCard) { const p = S.map.pads[S.selPad]; drawRangeRing(p.x, p.y, (DRAGONS[S.selCard].range[0] + (S.save.tiers[S.selCard] || 0) * 0.05) * (p.b === 'range' ? PAD_BONUS : 1), RGB[S.selCard]); }
+  const pulse = 0.5 + Math.sin(S.time * 6) * 0.5;
+  if (S.selCard || S.selPad >= 0) for (let i = 0; i < S.map.pads.length; i++) {
+    if (!padFree(i)) continue; const p = S.map.pads[i], sel = i === S.selPad;
+    ctx.strokeStyle = sel ? `rgba(245,197,66,${0.6 + pulse * 0.4})` : `rgba(245,197,66,${0.25 + pulse * 0.3})`; ctx.lineWidth = sel ? 3 : 2;
+    ctx.beginPath(); ctx.arc(p.x * T, p.y * T, T * (0.62 + pulse * 0.06), 0, TAU); ctx.stroke();
+  }
+  for (const f of S.effects) {
+    const k = 1 - f.t / f.max;
+    if (f.kind === 'rain') { const age = f.max - f.t; ctx.fillStyle = `rgba(255,120,30,${0.25 * (1 - k)})`; ctx.beginPath(); ctx.arc(f.x * T, f.y * T, f.r * T, 0, TAU); ctx.fill(); for (const s of f.streaks) { const p = (age - s.delay) / 0.35; if (p <= 0) continue; const sx = (f.x + s.dx) * T, sy = (f.y + s.dy) * T; if (p < 1) { ctx.strokeStyle = 'rgba(255,200,90,0.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(sx + T * 0.3 * (1 - p), sy - T * 3 * (1 - p)); ctx.lineTo(sx + T * 0.3 * (1 - p) + T * 0.1, sy - T * 3 * (1 - p) + T * 0.7); ctx.stroke(); } else { const a = Math.max(0, 1 - (p - 1) * 0.6); ctx.fillStyle = `rgba(255,140,40,${a})`; ctx.beginPath(); ctx.arc(sx, sy, T * 0.22 * (1 + (p - 1) * 0.5), 0, TAU); ctx.fill(); ctx.fillStyle = `rgba(255,240,150,${a})`; ctx.beginPath(); ctx.arc(sx, sy - T * 0.05, T * 0.1, 0, TAU); ctx.fill(); } } }
+  }
+}
+function drawOver() {
+  for (const p of S.parts) { ctx.globalAlpha = Math.max(0, p.life / p.max); ctx.fillStyle = p.col; ctx.beginPath(); ctx.arc(p.x * T, p.y * T, p.r * T, 0, TAU); ctx.fill(); }
+  ctx.globalAlpha = 1;
+  for (const f of S.effects) {
+    const k = 1 - f.t / f.max;
+    if (f.kind === 'boom') { ctx.strokeStyle = `rgba(${f.col},${1 - k})`; ctx.lineWidth = 3 * (1 - k) + 1; ctx.beginPath(); ctx.arc(f.x * T, f.y * T, f.r * T * (0.3 + k * 0.7), 0, TAU); ctx.stroke(); }
+    else if (f.kind === 'breath') {
+      const w = 1 + f.stage * 0.3, reach = f.len * Math.min(1, k * 2.6), a = (1 - k) * 0.8;
+      const col = f.el === 'fire' ? ['255,200,90', '255,70,10'] : f.el === 'ice' ? ['225,245,255', '110,190,255'] : ['190,245,110', '60,150,30'];
+      ctx.save(); ctx.translate(f.x * T, f.y * T); ctx.rotate(f.ang); if (f.el === 'fire') ctx.globalCompositeOperation = 'lighter';
+      const g = ctx.createLinearGradient(0, 0, reach * T, 0); g.addColorStop(0, `rgba(${col[0]},${a})`); g.addColorStop(0.55, `rgba(${col[1]},${a * 0.7})`); g.addColorStop(1, `rgba(${col[1]},0)`);
+      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(0, -T * 0.07 * w); ctx.lineTo(reach * T, -T * 0.42 * w); ctx.quadraticCurveTo(reach * T + T * 0.25, 0, reach * T, T * 0.42 * w); ctx.lineTo(0, T * 0.07 * w); ctx.closePath(); ctx.fill();
+      for (let i = 0; i < 4; i++) { const px = reach * T * ((i + 1) / 5), jit = Math.sin(S.time * 40 + i * 2.1 + f.ang) * T * 0.18 * w * (px / (reach * T + 0.01)); ctx.fillStyle = `rgba(${col[0]},${a * 0.7})`; ctx.beginPath(); ctx.arc(px, jit, T * 0.06 * w, 0, TAU); ctx.fill(); }
+      ctx.restore();
+    }
+    else if (f.kind === 'nova') { ctx.strokeStyle = `rgba(190,235,255,${1 - k})`; ctx.lineWidth = 4 * (1 - k) + 1; ctx.beginPath(); ctx.arc(f.x * T, f.y * T, f.r * T * k, 0, TAU); ctx.stroke(); }
+    else if (f.kind === 'flash') { ctx.fillStyle = `rgba(${f.col},${f.a * (1 - k)})`; ctx.fillRect(0, 0, CW, CH); }
+  }
+  if (S.flashRed > 0) { ctx.fillStyle = `rgba(200,30,20,${S.flashRed * 0.4})`; ctx.fillRect(0, 0, CW, CH); }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const t of S.texts) { ctx.globalAlpha = 1 - t.t; ctx.font = `bold ${Math.max(11, T * 0.42)}px "Trebuchet MS",sans-serif`; ctx.fillStyle = '#000'; ctx.fillText(t.text, t.x * T + 1, (t.y - t.t * 0.8) * T + 1); ctx.fillStyle = t.col; ctx.fillText(t.text, t.x * T, (t.y - t.t * 0.8) * T); }
+  ctx.globalAlpha = 1;
+  let hint = null;
+  if (S.aiming) hint = 'Tap the map to aim ' + SPELLS[S.aiming].name.toLowerCase();
+  else if (S.selCard) hint = 'Tap a glowing stone pad to place the ' + EL[S.selCard].name.toLowerCase() + ' dragon';
+  else if (S.selPad >= 0) hint = 'Pick a dragon below for this pad';
+  if (hint && !S.over) drawPill(hint, T * 1.0);
+  if (S.banner) { const a = Math.min(1, S.banner.t, (4 - S.banner.t) * 2); ctx.globalAlpha = Math.max(0, a); ctx.fillStyle = 'rgba(10,6,4,0.75)'; ctx.fillRect(0, CH * 0.36, CW, T * 2.4); ctx.fillStyle = '#f5c542'; ctx.font = `bold ${Math.max(16, T * 0.75)}px "Trebuchet MS",sans-serif`; ctx.fillText(S.banner.title, CW / 2, CH * 0.36 + T * 0.8); ctx.fillStyle = '#eadfc6'; ctx.font = `${Math.max(11, T * 0.4)}px "Trebuchet MS",sans-serif`; wrapText(S.banner.sub, CW / 2, CH * 0.36 + T * 1.6, CW - 20, T * 0.5); ctx.globalAlpha = 1; }
+  if (S.crippleT > 0 || S.wrathT > 0) { let s = []; if (S.wrathT > 0) s.push('Wrath ' + Math.ceil(S.wrathT) + 's'); if (S.crippleT > 0) s.push('Cripple ' + Math.ceil(S.crippleT) + 's'); ctx.font = `bold ${Math.max(10, T * 0.36)}px "Trebuchet MS",sans-serif`; ctx.textAlign = 'right'; ctx.fillStyle = '#fff'; ctx.fillText(s.join('  '), CW - 6, T * 0.4); ctx.textAlign = 'center'; }
+}
+function drawPill(text, y) { ctx.font = `bold ${Math.max(11, T * 0.4)}px "Trebuchet MS",sans-serif`; const w = ctx.measureText(text).width + T * 0.8; ctx.fillStyle = 'rgba(10,6,4,0.8)'; roundRect(ctx, CW / 2 - w / 2, y - T * 0.38, w, T * 0.76, T * 0.38); ctx.fill(); ctx.fillStyle = '#f5c542'; ctx.fillText(text, CW / 2, y); }
+function wrapText(text, x, y, maxW, lh) { const words = text.split(' '); let line = ''; for (const w of words) { const test = line ? line + ' ' + w : w; if (ctx.measureText(test).width > maxW && line) { ctx.fillText(line, x, y); line = w; y += lh; } else line = test; } if (line) ctx.fillText(line, x, y); }
+function draw() {
+  if (!ctx) return;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.clearRect(0, 0, CW, CH);
+  if (!S.map || !BG) return;
+  ctx.drawImage(BG, 0, 0, CW, CH);
+  drawTorches(); drawNestEggs(); drawDropped(); drawUnder();
+  for (const dr of S.dragons) drawDragon(dr);
+  const sorted = S.enemies.slice().sort((a, b) => a.y - b.y); for (const e of sorted) drawEnemy(e);
+  for (const s of S.shots) drawShot(s);
+  drawOver();
+}
+
+// ================= HUD and panel =================
+// Portraits reuse the in-game sprite: swap the drawing globals, draw a stand-in raider onto a small canvas, swap back.
+const PORTRAITS = {};
+function portrait(type) {
+  if (PORTRAITS[type]) return PORTRAITS[type];
+  const P = 32, cv = document.createElement('canvas'); cv.width = P * 2; cv.height = P * 2; const c = cv.getContext('2d'); c.scale(2, 2);
+  const saveCtx = ctx, saveT = T; ctx = c; T = P * 0.78;
+  drawEnemy({ x: (P / 2) / T, y: (P * 0.6) / T, scale: 1, bob: 0, ang: 0, invis: false, frozen: 0, hitT: 0, healFx: 0, elite: false, carry: false, hp: 1, maxhp: 1, def: ENEMIES[type], type });
+  ctx = saveCtx; T = saveT;
+  return PORTRAITS[type] = cv.toDataURL();
+}
+function updatePreview(show) {
+  const pv = $('preview');
+  if (!show) { if (lastHud.pv !== '') { lastHud.pv = ''; pv.classList.add('hidden'); } return; }
+  const key = S.wave + '|' + S.dragons.map(d => d.el[0]).join('') + '|' + (S.started ? 1 : 0);
+  if (key !== lastHud.pv) {
+    lastHud.pv = key;
+    const wave = adaptWave(S.waves[S.wave], S.wave + 1), n = {}; let adapted = false;
+    for (const u of wave) { n[u.type] = (n[u.type] || 0) + 1; if (u.adapted) adapted = true; }
+    const parts = Object.keys(n).sort((a, b) => ENEMIES[a].cost - ENEMIES[b].cost).map(k => { const d = ENEMIES[k]; return `<span class="pt"><img src="${portrait(k)}" alt="${d.name}"><b>${n[k]}</b><i style="background:${d.weak ? EL[d.weak].col : 'transparent'}"></i></span>`; });
+    pv.innerHTML = `<span class="lbl">Next</span>${parts.join('')}${adapted ? '<span class="ad">adapting to your dragons</span>' : ''}${S.started ? '<span class="cdn" id="pvCd"></span>' : ''}`;
+    pv.classList.remove('hidden');
+  }
+  const cd = $('pvCd'); if (cd) { const t = Math.ceil(S.betweenT) + 's'; if (cd.textContent !== t) cd.textContent = t; }
+}
+function updateHud() {
+  const set = (id, v) => { if (lastHud[id] !== v) { lastHud[id] = v; $(id).textContent = v; } };
+  set('meat', Math.floor(S.meat)); set('eggs', `${S.eggsNest}/${S.eggsTotal}`); set('wave', S.endless ? `${S.wave}` : `${S.wave}/${S.totalWaves}`);
+  if (lastHud.spd !== S.speed) { lastHud.spd = S.speed; $('speedBtn').innerHTML = S.speed + '×<small>speed</small>'; $('speedBtn').classList.toggle('fast', S.speed > 1); }
+  let label = null;
+  if (S.over || S.screen !== 'game') label = null;
+  else if (!S.started) label = 'Start the raid';
+  else if (!S.waveActive && S.wave < S.totalWaves) label = `Call wave ${S.wave + 1} now (+${Math.ceil(S.betweenT)})`;
+  if (label !== lastHud.nb) { lastHud.nb = label; if (label) { $('nextBtn').textContent = label; $('wavebar').classList.remove('hidden'); } else $('wavebar').classList.add('hidden'); }
+  updatePreview(label && !S.endless && S.wave < S.totalWaves && S.waves[S.wave]);
+  for (const id in spellEls) { const el = spellEls[id], cd = S.spellCd[id]; el.cd.style.height = (cd > 0 ? cd / spellCdFor(id, spellTier(id) || 1) * 100 : 0) + '%'; el.btn.classList.toggle('poor', S.meat < spellCost(id)); el.btn.classList.toggle('dis', cd > 0); el.btn.classList.toggle('sel', S.aiming === id); }
+  for (const el in cardEls) { cardEls[el].classList.toggle('dis', S.meat < DRAGONS[el].cost[0]); cardEls[el].classList.toggle('sel', S.selCard === el); }
+}
+function renderPanel() {
+  const br = $('buildRow'), sr = $('spellRow'), ir = $('infoRow');
+  cardEls = {}; spellEls = {};
+  if (S.selDragon && !S.over) {
+    br.classList.add('hidden'); ir.classList.remove('hidden');
+    const dr = S.selDragon, d = DRAGONS[dr.el], st = dragonStats(dr);
+    ir.innerHTML = `<div class="info"><b style="color:${EL[dr.el].col}">${STAGE[dr.stage]} ${EL[dr.el].name.toLowerCase()} dragon</b><span class="skills named">${skillHtml(dr.el, dr.stage, true)}</span><small>${PAD_NOTE[(S.map.pads[dr.pad] || {}).b] || ''}${d.desc[dr.stage]} Damage ${st.dmg.toFixed(0)}, range ${st.range.toFixed(1)}.</small></div>` +
+      `<button id="upBtn" class="primary" ${dr.stage >= 2 ? 'disabled' : ''}>${dr.stage < 2 ? `Grow<br>${d.cost[dr.stage + 1]} meat` : 'Giant'}</button><button id="sellBtn">Sell<br>+${Math.floor(dr.spent * 0.6)}</button><button id="closeBtn">✕</button>`;
+    $('upBtn').onclick = () => { if (upgradeDragon(dr)) renderPanel(); else floatText(dr.x, dr.y - 0.7, 'Need meat', '#ff6a6a'); };
+    $('sellBtn').onclick = () => { sellDragon(dr); S.selDragon = null; renderPanel(); };
+    $('closeBtn').onclick = () => { S.selDragon = null; renderPanel(); };
+  } else {
+    ir.classList.add('hidden'); br.classList.remove('hidden'); br.innerHTML = '';
+    for (const el in DRAGONS) { const c = document.createElement('div'); c.className = 'card'; c.innerHTML = `<span class="dot" style="background:${EL[el].col};color:${EL[el].col}"></span><b>${EL[el].name} dragon</b><span class="skills">${skillHtml(el, 0, false)}</span><span class="cost">${DRAGONS[el].cost[0]} meat</span>`; c.onclick = () => onCard(el); br.appendChild(c); cardEls[el] = c; }
+  }
+  sr.innerHTML = '';
+  const owned = Object.keys(SPELLS).filter(k => S.save.spells[k]);
+  if (!owned.length) { const h = document.createElement('div'); h.className = 'hint'; h.textContent = 'Spells go here once you buy them in the shop with gold'; sr.appendChild(h); }
+  for (const id of owned) { const b = document.createElement('div'); b.className = 'card spell'; b.innerHTML = `<b style="color:${SPELLS[id].col}">${SPELLS[id].short}${spellTier(id) > 1 ? ' ' + ['', '', 'II', 'III'][spellTier(id)] : ''}</b><small class="mc">${spellCost(id)} meat</small><div class="cd"></div>`; b.onclick = () => { if (S.over) return; if (S.aiming === id) { S.aiming = null; updateHud(); return; } castSpell(id, null); }; sr.appendChild(b); spellEls[id] = { btn: b, cd: b.querySelector('.cd') }; }
+  updateHud();
+}
+function onCard(el) {
+  if (S.over) return; S.aiming = null;
+  if (S.selPad >= 0) { if (placeDragon(S.selPad, el)) { S.selPad = -1; S.selCard = null; } else { const p = S.map.pads[S.selPad]; floatText(p.x, p.y - 0.7, 'Need ' + DRAGONS[el].cost[0] + ' meat', '#ff6a6a'); } }
+  else S.selCard = (S.selCard === el ? null : el);
+  S.selDragon = null; renderPanel();
+}
+
+// ================= screens =================
+function showModal(html) { $('modal').innerHTML = html; $('overlay').classList.remove('hidden'); $('modal').scrollTop = 0; }
+function hideOverlay() { $('overlay').classList.add('hidden'); }
+function totalStars() { let n = 0; for (const m of S.save.stars) for (const s of m) n += s || 0; return n; }
+function allCleared() { for (let m = 0; m < 3; m++) for (let i = 0; i < LPM; i++) if (!(S.save.stars[m][i] > 0)) return false; return true; }
+function drawTitleArt() {
+  const cv = $('titleArt'); if (!cv || !cv.getContext) return; const c = cv.getContext('2d'); if (!c) return;
+  c.clearRect(0, 0, cv.width, cv.height);
+  const specs = [['fire', 1, 78, 60, -0.35], ['ice', 2, 150, 58, 0], ['poison', 1, 222, 60, 0.35]];
+  for (const [el, st, x, y, rot] of specs) { c.save(); c.translate(x, y); c.rotate(rot); drawDragonSprite(c, [16, 20, 24][st], el, st, 0, performance.now() / 1000, x); c.restore(); }
+  for (let i = 0; i < 4; i++) drawEgg(c, 120 + i * 20, 98, 8, (i - 1.5) * 0.3);
+}
+function drawThumb(cv, m) {
+  if (!cv || !cv.getContext) return; const c = cv.getContext('2d'); if (!c) return; const s = cv.width / COLS;
+  c.fillStyle = m.rock; c.fillRect(0, 0, cv.width, cv.height); c.lineCap = 'round'; c.lineJoin = 'round';
+  const all = m.paths.concat(m.outPaths || []); c.strokeStyle = '#6a5440'; c.lineWidth = s * 1.1;
+  for (const p of all) { c.beginPath(); c.moveTo(p[0].x * s, p[0].y * s); for (let i = 1; i < p.length; i++) c.lineTo(p[i].x * s, p[i].y * s); c.stroke(); }
+  c.fillStyle = '#c9a24a'; c.beginPath(); c.arc(m.nest.x * s, m.nest.y * s, s * 1.1, 0, TAU); c.fill();
+  c.fillStyle = '#8a8a8a'; for (const p of m.pads) { c.beginPath(); c.arc(p.x * s, p.y * s, s * 0.4, 0, TAU); c.fill(); }
+}
+function newGameScreen() {
+  showModal(`<h2>New game</h2><div class="help"><p>This wipes your gold, stars, shop upgrades and spells, here and in your cloud save, and starts you back at Old Dungeon level 1. Your save code screen can give you a backup first.</p>` +
+    `<p class="center" style="color:var(--dim);font-size:12px">You have gold ${S.save.gold} and ${totalStars()} stars.</p>` +
+    `<div class="btns"><button id="ngYes" class="primary">Wipe and start over</button><button id="ngBackup">Get a save code first</button><button id="ngNo">Keep my progress</button></div></div>`);
+  let armed = false;
+  $('ngYes').onclick = () => { if (!armed) { armed = true; $('ngYes').textContent = 'Tap once more to confirm'; return; } const diff = S.save.diff, muted = S.save.muted, music = S.save.music; S.save = defaultSave(); S.save.diff = diff; S.save.muted = muted; S.save.music = music; persist(); titleScreen(); };
+  $('ngBackup').onclick = () => transferScreen(() => newGameScreen());
+  $('ngNo').onclick = titleScreen;
+}
+function diffPickerHtml() {
+  const d = diffCur();
+  return `<div class="diff"><div class="btns">${Object.keys(DIFF).map(k => `<button data-d="${k}" class="${S.save.diff === k ? 'on' : ''}">${DIFF[k].name}</button>`).join('')}</div><p class="center diffdesc">${d.desc}</p></div>`;
+}
+function bindDiffPicker(rerender) { document.querySelectorAll('#modal .diff button').forEach(b => { b.onclick = () => { S.save.diff = b.dataset.d; persist(); rerender(); }; }); }
+function titleScreen() {
+  S.screen = 'title'; S.map = null;
+  showModal(`<h1>EGG LAIR</h1><canvas id="titleArt" width="300" height="112" style="width:100%;height:auto;display:block;margin:4px 0 6px"></canvas>` +
+    `<p class="center">The humans believe dragon eggs grant eternal life. They're coming for the nest. Your dragons disagree.</p>` +
+    `<div class="btns"><button class="primary" id="playBtn">Play</button><button id="helpBtn">How to play</button><button id="xferBtn">Save code</button></div>` + diffPickerHtml() +
+    `<p class="center" style="color:var(--dim);font-size:12px;margin-top:12px">Gold ${S.save.gold} &nbsp;·&nbsp; Stars ${totalStars()}/${LPM * 9}</p>` +
+    `<p class="center savestate ${CLOUD.state}">${cloudLabel()}${CLOUD.state === 'denied' && CLOUD.perms ? ' <button id="fixCloud" class="tiny">Allow</button>' : ''}</p>` +
+    `<div class="btns"><button id="newGameBtn" class="tiny">New game</button></div>`);
+  drawTitleArt(); bindDiffPicker(titleScreen);
+  const fx = $('fixCloud'); if (fx) fx.onclick = async () => { try { await CLOUD.perms.manage(); } catch (e) {} CLOUD.state = 'starting'; cloudInit(); };
+  $('newGameBtn').onclick = () => newGameScreen(); $('playBtn').onclick = mapScreen; $('helpBtn').onclick = () => helpScreen(titleScreen); $('xferBtn').onclick = () => transferScreen(titleScreen);
+}
+function transferScreen(back, note) {
+  const code = saveCode();
+  showModal(`<h2>Save code</h2><div class="help">` +
+    `<p><b>${cloudLabel()}.</b> ${CLOUD.state === 'on' ? 'Progress is kept with your Claude account for this game and in this browser.' : 'Progress is kept in this browser only, which the Claude app can clear.'} Copy this code and paste it into the game on another browser, site or device to carry your gold, stars, shop upgrades and spells across.</p>` +
+    (note ? `<p class="center" style="color:#8ef04a"><b>${note}</b></p>` : '') +
+    `<p><b>Your code</b> (gold ${S.save.gold}, stars ${totalStars()})</p><textarea id="codeOut" readonly>${code}</textarea>` +
+    `<div class="btns"><button id="copyBtn" class="primary">Copy code</button></div>` +
+    `<p><b>Paste a code</b></p><textarea id="codeIn" placeholder="EGG1...."></textarea>` +
+    `<div class="btns"><button id="importBtn">Import</button><button id="backBtn">Back</button></div><p id="xferMsg" class="center" style="color:var(--dim);font-size:12px"></p></div>`);
+  const msg = t => { $('xferMsg').textContent = t; };
+  $('copyBtn').onclick = async () => { const ta = $('codeOut'); ta.focus(); ta.select(); ta.setSelectionRange(0, code.length); let ok = false; try { await navigator.clipboard.writeText(code); ok = true; } catch (e) { try { ok = document.execCommand('copy'); } catch (e2) {} } $('copyBtn').textContent = ok ? 'Copied' : 'Select all and copy'; };
+  let armed = false;
+  $('importBtn').onclick = () => {
+    const parsed = parseSaveCode($('codeIn').value); if (!parsed) { msg('That code isn\'t valid. Check it was pasted in full.'); armed = false; $('importBtn').textContent = 'Import'; return; }
+    if (!armed) { armed = true; $('importBtn').textContent = 'Replace current progress?'; msg(`This will replace your current progress (gold ${S.save.gold}, stars ${totalStars()}) with the code's (gold ${parsed.gold}). Tap again to confirm.`); return; }
+    S.save = parsed; persist(); transferScreen(back, 'Progress imported.');
+  };
+  $('backBtn').onclick = back;
+}
+function mapScreen() {
+  S.screen = 'menu'; let html = `<h2>Choose a lair</h2><div class="maps">`;
+  MAPS.forEach((m, i) => { const st = (S.save.stars[i] || []).reduce((a, b) => a + (b || 0), 0); const done = (S.save.stars[i] || []).filter(s => s > 0).length; html += `<div class="mapcard" id="mapcard${i}"><canvas id="thumb${i}" width="72" height="96"></canvas><div><b>${m.name}</b><small>${m.blurb}</small><span class="stars">★ ${st}/${LPM * 3} &nbsp; ${done}/${LPM} levels</span></div></div>`; });
+  html += `</div><div class="btns"><button id="shopBtn">Shop (${S.save.gold} gold)</button><button id="backBtn">Back</button></div>`;
+  showModal(html);
+  MAPS.forEach((m, i) => { drawThumb($('thumb' + i), m); $('mapcard' + i).onclick = () => levelScreen(i); });
+  $('shopBtn').onclick = () => shopScreen(mapScreen); $('backBtn').onclick = titleScreen;
+}
+function levelScreen(mi) {
+  S.screen = 'menu'; const m = MAPS[mi], stars = S.save.stars[mi];
+  let html = `<h2>${m.name}</h2>`;
+  html += diffPickerHtml();
+  html += `<div class="grid">`;
+  for (let i = 0; i < LPM; i++) { const unlocked = i === 0 || (stars[i - 1] > 0), s = stars[i] || 0; html += `<div class="lvl ${unlocked ? '' : 'lock'}" data-i="${i}">${i + 1}<span class="stars">${'★'.repeat(s)}${'☆'.repeat(3 - s)}</span></div>`; }
+  html += `</div><div class="btns">`;
+  if (stars[LPM - 1] > 0) html += `<button id="endlessBtn">Endless${S.save.endless[mi] ? ' (best ' + S.save.endless[mi] + ')' : ''}</button>`;
+  html += `<button id="shopBtn">Shop (${S.save.gold} gold)</button><button id="backBtn">Back</button></div>`;
+  showModal(html);
+  document.querySelectorAll('#modal .lvl').forEach(el => { el.onclick = () => { if (el.classList.contains('lock')) return; startLevel(mi, +el.dataset.i, {}); }; });
+  bindDiffPicker(() => levelScreen(mi));
+  const eb = $('endlessBtn'); if (eb) eb.onclick = () => startLevel(mi, LPM - 1, { endless: true });
+  $('shopBtn').onclick = () => shopScreen(() => levelScreen(mi)); $('backBtn').onclick = mapScreen;
+}
+function itemTier(it) { return it.spell ? spellTier(it.id) : it.id === 'eggs' ? S.save.eggs : it.id === 'auto' ? S.save.auto : (S.save.tiers[it.id] || 0); }
+function shopScreen(back) {
+  const prev = S.screen; S.screen = 'menu';
+  let html = `<h2>Shop <span style="float:right">${S.save.gold} gold</span></h2><p style="margin-top:-6px">Gold comes from finishing levels. Upgrades are permanent.</p><div class="shop">`;
+  SHOP.forEach((it, idx) => {
+    const tier = itemTier(it), maxed = tier >= it.max, cost = maxed ? 0 : it.cost[tier];
+    const locked = it.spell && !maxed && cleared() < SPELL_REQ[tier];
+    let desc;
+    if (it.spell) { const sp = SPELLS[it.id]; const line = t => `${sp.tdesc(t)} (cooldown ${spellCdFor(it.id, t)}s)`; desc = (tier ? line(tier) + (maxed ? '' : '. Next: ' + line(tier + 1).toLowerCase()) : line(1)) + `. Costs ${sp.meat} meat to cast`; if (locked) desc += `. Tier ${tier + 1} unlocks after ${SPELL_REQ[tier]} levels cleared (${cleared()} so far)`; }
+    else desc = it.desc(tier) + (maxed ? '' : '. Next: ' + it.desc(tier + 1).toLowerCase());
+    html += `<div class="item"><div><b>${it.name}</b> <span class="tier">${tier + '/' + it.max}</span><small>${desc}</small></div><button data-i="${idx}" ${maxed || locked || S.save.gold < cost ? 'disabled' : ''}>${maxed ? '✓' : locked ? 'locked' : cost + 'g'}</button></div>`;
+  });
+  html += `</div><div class="btns"><button id="backBtn" class="primary">Done</button></div>`;
+  showModal(html);
+  document.querySelectorAll('#modal .shop button').forEach(b => { b.onclick = () => { buyItem(SHOP[+b.dataset.i]); shopScreen(back); }; });
+  $('backBtn').onclick = () => { S.screen = prev; back(); };
+}
+function buyItem(it) {
+  const tier = itemTier(it); if (tier >= it.max) return; const cost = it.cost[tier]; if (S.save.gold < cost) return; if (it.spell && cleared() < SPELL_REQ[tier]) return;
+  S.save.gold -= cost;
+  if (it.spell) S.save.spells[it.id] = tier + 1; else if (it.id === 'eggs') S.save.eggs++; else if (it.id === 'auto') S.save.auto++; else S.save.tiers[it.id]++;
+  persist(); SFX.build();
+}
+function showEndScreen(won, stars, gold, first) {
+  let html = '';
+  if (S.endless) html += `<h2>The raid is over</h2><p>You held the nest through ${Math.max(0, S.wave - 1)} full waves.</p>`;
+  else if (won) html += `<h2>Nest defended</h2><div class="bigstars">${'★'.repeat(stars)}<span style="opacity:.25">${'★'.repeat(3 - stars)}</span></div><p class="center">${S.eggsTotal - S.eggsStolen} of ${S.eggsTotal} eggs kept${first ? '. First clear bonus!' : '.'}</p>`;
+  else html += `<h2>The nest is empty</h2><p>The humans carried off the last egg on wave ${S.wave}. Kill egg carriers first: dragons already prioritise them, so put your strongest dragons on the way out, and tap dropped eggs to send them home.</p>`;
+  html += `<p class="center">Gold earned <b style="color:var(--gold)">+${gold}</b> &nbsp;(you have ${S.save.gold})</p><div class="btns">`;
+  const hasNext = !S.endless && won && S.levelIdx < LPM - 1;
+  if (hasNext) html += `<button id="nextLvl" class="primary">Next level</button>`;
+  html += `<button id="retryBtn" ${hasNext ? '' : 'class="primary"'}>${won ? 'Play again' : 'Try again'}</button><button id="shopBtn2">Shop</button><button id="lvlBtn">Levels</button></div>`;
+  showModal(html);
+  if (hasNext) $('nextLvl').onclick = () => startLevel(S.mapIdx, S.levelIdx + 1, {});
+  $('retryBtn').onclick = () => startLevel(S.mapIdx, S.levelIdx, { endless: S.endless });
+  $('shopBtn2').onclick = () => shopScreen(() => showEndScreen(won, stars, gold, first));
+  $('lvlBtn').onclick = () => levelScreen(S.mapIdx);
+}
+function pauseScreen() {
+  musicStop();
+  if (S.screen !== 'game' || S.over) return; S.paused = true;
+  showModal(`<h2>Paused</h2><div class="btns"><button id="resumeBtn" class="primary">Resume</button><button id="restartBtn">Restart level</button><button id="quitBtn">Quit to levels</button><button id="muteBtn">${S.save.muted ? 'Sound on' : 'Sound off'}</button><button id="musicBtn">${S.save.music === false ? 'Music on' : 'Music off'}</button><button id="helpBtn2">How to play</button></div>`);
+  $('resumeBtn').onclick = () => { S.paused = false; hideOverlay(); musicStart(); };
+  $('musicBtn').onclick = () => { S.save.music = S.save.music === false ? true : false; persist(); if (S.save.music === false) musicStop(); pauseScreen(); };
+  $('restartBtn').onclick = () => startLevel(S.mapIdx, S.levelIdx, { endless: S.endless });
+  $('quitBtn').onclick = () => { S.over = true; S.paused = false; musicStop(); levelScreen(S.mapIdx); };
+  $('muteBtn').onclick = () => { S.save.muted = !S.save.muted; persist(); if (S.save.muted) musicStop(); pauseScreen(); };
+  $('helpBtn2').onclick = () => helpScreen(pauseScreen);
+}
+function helpScreen(back) {
+  const sw = c => `<span class="swatch" style="background:${c}"></span>`;
+  let html = `<h2>How to play</h2><div class="help">` +
+    `<p>Humans walk in through the gate, grab an egg from the nest and walk back out. Every egg that leaves the map is gone. Lose them all and the level is lost.</p>` +
+    `<p><b>Dragons</b> are your towers. Tap a stone pad, then a dragon card (or the other way round). Tap a placed dragon to grow it or sell it for 60%. They cost meat, which you get for every human killed and every wave cleared.</p>` +
+    `<p>${sw('#ff6a2b')}<b>Fire</b> hits hardest. Adults set humans burning, giants splash. ${sw('#7fd0ff')}<b>Ice</b> slows, adults can freeze, giants pulse a frost nova. ${sw('#8ef04a')}<b>Poison</b> venom keeps hurting and ignores armour; giants poison everything near them.</p>` +
+    `<p><b>Eggs</b> dropped by a dead carrier sit on the floor until you tap them home, or until another human picks them up. The auto-return upgrade sends them home for you.</p>` +
+    `<p><b>Humans:</b> ` + Object.keys(ENEMIES).map(k => `${sw(ENEMIES[k].col)}${ENEMIES[k].name}: ${ENEMIES[k].tip}`).join(' ') + `</p>` +
+    `<p><b>Spells</b> are bought with gold and upgraded to tier 3 as you clear levels. Casting one costs meat and starts a cooldown, so they're a rescue, not a plan: every level can be won with dragons alone. Call the next wave early for bonus meat.</p>` +
+    `<p><b>Difficulty</b> can be changed any time from the title or level screen. Easy caps levels at two stars; Hard pays 60% more gold.</p>` +
+    `<p><b>Saving</b> is automatic. Inside Claude it goes to your account (the title screen shows "Cloud save on" when that's working); on any other site it stays in the browser. The title screen also has New game to wipe everything and start over.</p>` +
+    `<p><b>Progress</b> saves in this browser. Use <b>Save code</b> on the title screen to copy it to another browser or device.</p></div><div class="btns"><button id="backBtn" class="primary">Back</button></div>`;
+  showModal(html); $('backBtn').onclick = back;
+}
+
+// ================= input =================
+function resize() {
+  const st = $('stage'), w = st.clientWidth || 360, h = st.clientHeight || 480;
+  T = Math.max(8, Math.floor(Math.min(w / COLS, h / ROWS) * 4) / 4);
+  CW = Math.floor(T * COLS); CH = Math.floor(T * ROWS);
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  canvas.style.width = CW + 'px'; canvas.style.height = CH + 'px'; canvas.style.left = Math.floor((w - CW) / 2) + 'px'; canvas.style.top = Math.floor((h - CH) / 2) + 'px';
+  canvas.width = Math.round(CW * DPR); canvas.height = Math.round(CH * DPR);
+  if (S.map) buildBackground();
+}
+function onTap(ux, uy) {
+  if (S.screen !== 'game' || S.paused || S.over) return;
+  if (S.aiming) { castSpell(S.aiming, { x: ux, y: uy }); return; }
+  for (const g of S.dropped) if (!g.dead && !g.returning && Math.hypot(g.x - ux, g.y - uy) < 0.65) { startReturn(g); SFX.tap(); return; }
+  for (const dr of S.dragons) if (Math.hypot(dr.x - ux, dr.y - uy) < 0.8) { S.selDragon = (S.selDragon === dr ? null : dr); S.selPad = -1; S.selCard = null; renderPanel(); SFX.tap(); return; }
+  for (let i = 0; i < S.map.pads.length; i++) {
+    const p = S.map.pads[i]; if (Math.hypot(p.x - ux, p.y - uy) > 0.8 || !padFree(i)) continue;
+    if (S.selCard) { if (placeDragon(i, S.selCard)) { S.selCard = null; S.selPad = -1; } else floatText(p.x, p.y - 0.7, 'Need ' + DRAGONS[S.selCard].cost[0] + ' meat', '#ff6a6a'); }
+    else S.selPad = (S.selPad === i ? -1 : i);
+    S.selDragon = null; renderPanel(); SFX.tap(); return;
+  }
+  if (S.selPad >= 0 || S.selCard || S.selDragon) { S.selPad = -1; S.selCard = null; S.selDragon = null; renderPanel(); }
+}
+function bindInput() {
+  canvas.addEventListener('pointerdown', ev => { ev.preventDefault(); auInit(); const r = canvas.getBoundingClientRect(); onTap((ev.clientX - r.left) / T, (ev.clientY - r.top) / T); });
+  $('nextBtn').addEventListener('click', () => { auInit(); if (S.screen !== 'game' || S.over || S.paused) return; callWave(S.started ? Math.ceil(S.betweenT) : 0); });
+  $('speedBtn').addEventListener('click', () => { S.speed = S.speed >= 4 ? 1 : S.speed + 1; updateHud(); });
+  $('pauseBtn').addEventListener('click', () => { auInit(); pauseScreen(); });
+  document.addEventListener('pointerdown', auInit, { once: true });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && S.screen === 'game' && !S.over && !S.paused) pauseScreen(); });
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 200));
+}
+
+// ================= loop =================
+let last = 0;
+function frame(now) {
+  if (!last) last = now;
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (S.screen === 'game' && !S.paused && !S.over) { for (let i = 0; i < S.speed; i++) update(dt); updateHud(); }
+  else if (S.screen === 'game') { S.time += dt; updateFx(dt); }
+  if (S.screen === 'game') draw();
+  requestAnimationFrame(frame);
+}
+function init() {
+  S.save = loadSave(); canvas = $('game'); ctx = canvas.getContext('2d');
+  resize(); bindInput(); renderPanel(); titleScreen(); requestAnimationFrame(frame); cloudInit();
+}
+window.EggLair = { S, MAPS, startReturn, DRAGONS, ENEMIES, SHOP, startLevel, placeDragon, upgradeDragon, sellDragon, callWave, update, draw, genWave, distToPath, defaultSave, castSpell, resize, titleScreen };
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+</body>
+</html>
